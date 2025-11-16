@@ -288,3 +288,45 @@ class MeshRepeatedCylindersTerrainCfg(MeshRepeatedObjectsTerrainCfg):
     """The box curriculum parameters at the start of the curriculum."""
     object_params_end: ObjectCfg = MISSING
     """The box curriculum parameters at the end of the curriculum."""
+
+
+
+
+# ---- ---------------オリジナル地形---------------------------------
+@configclass
+class MeshMoatTerrainCfg(SubTerrainBaseCfg):
+
+    function = mesh_terrains.moat_terrain
+
+    platform_width = 1.95        # 1.5 m × 1.5 m
+    # 堀の“幅”（中央台の外周から外側地面までの距離）
+    moat_width = 2.7                  # 例: 1.0 m（お好みで調整）
+    # 落差（m）
+    moat_depth = 0.3                 # 指定どおり 0.30 m
+    # メッシュの厚み（実体化用のZ厚さ）
+    platform_thickness = 0.30         
+    ring_thickness     = 0.20         # 外周リングの厚み
+    floor_thickness    = 0.10         # 堀底のスラブ厚
+    # 便利オプション
+    center = None                     # Noneなら自動（sizeの中央が原点）
+
+
+
+
+# @configclass
+# class MeshSinkingTilesTerrainCfg(SubTerrainBaseCfg):
+#     """Configuration for the sinking tiles mesh terrain."""
+
+#     funcition = mesh_terrains.sinking_tiles_terrain
+    
+#     # 中央の安全なプラットフォームの幅 (m)
+#     platform_width: float = 2.0
+#     # タイルの1辺のサイズ (m)
+#     tile_size: float = 0.3
+#     # タイル間の隙間 (m)
+#     tile_gap: float = 0.05
+#     # 地形の厚み (m) (Z=0 からこの厚み分だけ下がる)
+#     terrain_height: float = 0.5 
+#     # (difficultyに応じて変えるパラメータ)
+#     # 例: 難易度でタイルのサイズを変える
+#     tile_size_range: tuple[float, float] = (0.2, 0.4)

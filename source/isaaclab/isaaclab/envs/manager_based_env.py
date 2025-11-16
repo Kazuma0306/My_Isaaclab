@@ -24,6 +24,1648 @@ from isaaclab.utils.timer import Timer
 from .common import VecEnvObs
 from .manager_based_env_cfg import ManagerBasedEnvCfg
 from .ui import ViewportCameraController
+from pxr import Usd, UsdGeom, UsdPhysics, Gf
+import os
+import omni.usd
+import numpy as np
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
+
+
+from pxr import Usd, UsdGeom, UsdPhysics, Gf, PhysxSchema
+from isaaclab.sim import utils as sim_utils
+
+
+
+# def add_breakable_spherical_joint4(stage, stone_path,
+#                                    break_force=200.0, break_torque=30.0, cone_limit_deg=8.0):
+#     if not stone_path or not stone_path.startswith("/"):
+#         raise ValueError(f"stone_path must be absolute: {stone_path!r}")
+#     stone = stage.GetPrimAtPath(stone_path)
+#     if not stone.IsValid():
+#         raise RuntimeError(f"stone prim not found: {stone_path}")
+
+#     joint_path = f"{stone_path}/Joint"
+#     joint = UsdPhysics.SphericalJoint.Define(stage, joint_path)
+#     joint.CreateBody0Rel().SetTargets([stone_path])   # World 拘束（片側のみ）
+#     joint.CreateBody1Rel().SetTargets(["/World"])
+
+#     # 石の半厚を見積もる（extentが無い時はフォールバック値）
+#     half_h = 0.15
+#     try:
+#         b = UsdGeom.Boundable(stone)
+#         ext = b.GetExtentAttr().Get()
+#         if ext:
+#             half_h = 0.5 * (float(ext[1][2]) - float(ext[0][2]))
+#     except Exception:
+#         pass
+
+#     # 石ローカルの底面中心をアンカーに
+#     local_anchor = Gf.Vec3f(0.0, 0.0, -0.01)
+
+#     # ワールド座標へ変換（★ここを修正）
+#     time = Usd.TimeCode.Default()  # もしくは Usd.TimeCode(stage.GetStartTimeCode())
+#     xf = UsdGeom.Xformable(stone).ComputeLocalToWorldTransform(time)
+#     world_anchor = Gf.Matrix4d(xf).Transform(Gf.Vec3d(0.0, 0.0, 0))
+
+#     # アンカー整合
+#     joint.CreateLocalPos0Attr().Set(local_anchor)            # 石ローカル
+#     joint.CreateLocalRot0Attr().Set(Gf.Quatf(1,0,0,0))
+#     joint.CreateLocalPos1Attr().Set(Gf.Vec3f(world_anchor))  # ワールド側
+#     joint.CreateLocalRot1Attr().Set(Gf.Quatf(1,0,0,0))
+
+#     # 破断＆コーン角
+#     joint.CreateBreakForceAttr().Set(float(break_force))
+#     joint.CreateBreakTorqueAttr().Set(float(break_torque))
+
+#     lim = UsdPhysics.LimitAPI.Apply(joint.GetPrim(), "angular")
+#     lim.CreateLowAttr().Set(0.0)
+#     lim.CreateHighAttr().Set(float(cone_limit_deg))
+#     if hasattr(lim, "CreateEnabledAttr"):
+#         lim.CreateEnabledAttr().Set(True)
+
+
+
+
+
+
+# def add_breakable_spherical_joint7(stage, stone_path, env_origin_vec: Gf.Vec3f,
+#                                    break_force=5000.0, break_torque=500.0,
+#                                    cone_limit_deg=180.0):
+    
+#     stone = stage.GetPrimAtPath(stone_path)
+#     if not stone.IsValid():
+#         print(f"Warning: stone prim not found: {stone_path}")
+#         return 
+
+#     joint_path = f"{stone_path}_Joint"
+#     if stage.GetPrimAtPath(joint_path).IsValid():
+#         stage.RemovePrim(joint_path)
+
+#     joint = UsdPhysics.SphericalJoint.Define(stage, joint_path)
+
+#     # World拘束: Body0=石、Body1=/World (★これは必須)
+#     joint.CreateBody0Rel().SetTargets([stone_path])
+#     joint.CreateBody1Rel().SetTargets(["/World"])
+
+#     local_bottom_z =0
+
+#     # === アンカー計算 (★ここが重要) ===
+    
+#     # 1. 石の「ローカル」変換を取得 (親である env_X からの相対)
+#     stone_xform = UsdGeom.Xformable(stone)
+#     # GetLocalTransformation() は、親を含まない、純粋な石自身のxformOpを読む
+#     local_transform_matrix = stone_xform.GetLocalTransformation(Usd.TimeCode.Default())
+#     # 石のローカル原点(0,0,0)が、env_X の中でどの座標にあるか
+#     local_p_vec3d = local_transform_matrix.Transform(Gf.Vec3d(0, 0, local_bottom_z))
+#     local_p = Gf.Vec3f(local_p_vec3d) # (例: env_X の (1, 2, 0.15) など)
+    
+#     # 2. 正しいワールド座標を「手動で計算」する
+#     #    p_world = (envのワールド座標) + (石のenv内ローカル座標)
+#     p_world = env_origin_vec + local_p
+
+#     # 3. アンカーを設定 (吹っ飛ばない「0基準」アンカー)
+#     # ローカル側 (Body0 = 石)
+#     joint.CreateLocalPos0Attr().Set(Gf.Vec3f(0, 0, 0)) # 石の原点
+#     joint.CreateLocalRot0Attr().Set(Gf.Quatf(1, 0, 0, 0))
+    
+#     # ワールド側 (Body1 = /World)
+#     joint.CreateLocalPos1Attr().Set(p_world) # ★計算した正しいワールド座標
+#     joint.CreateLocalRot1Attr().Set(Gf.Quatf(1, 0, 0, 0))
+
+#     # 破断とリミット
+#     joint.CreateBreakForceAttr().Set(float(break_force))
+#     joint.CreateBreakTorqueAttr().Set(float(break_torque))
+
+#     lim = UsdPhysics.LimitAPI.Apply(joint.GetPrim(), "angular")
+#     lim.CreateLowAttr().Set(0.0)
+#     lim.CreateHighAttr().Set(float(cone_limit_deg))
+#     if hasattr(lim, "CreateEnabledAttr"):
+#         lim.CreateEnabledAttr().Set(True)
+
+
+
+
+def post_spawn_hook2(scene: InteractiveScene):
+    """
+    シーン生成直後に呼び、各ENVの石に破断ジョイントを付与。
+    """
+    stage = omni.usd.get_context().get_stage()
+    
+    # シーンからenvごとの原点（オフセット）を取得 (CPUのnumpy配列に変換)
+    env_origins_np = scene.env_origins.cpu().numpy() # (num_envs, 3)
+
+    for env_id in range(scene.num_envs):
+        # このenvのワールド座標系でのオフセット (Gf.Vec3f型)
+        env_origin = Gf.Vec3f(float(env_origins_np[env_id][0]), 
+                              float(env_origins_np[env_id][1]), 
+                              float(env_origins_np[env_id][2]))
+
+        for i in range(3): # Stone_0, Stone_1, ...
+            stone_path = f"/World/envs/env_{env_id}/Stone_{i}"
+            
+            # ★ env_origin を渡す新しい関数 (v7) を呼ぶ
+            add_breakable_spherical_joint7(
+                stage, stone_path, env_origin,
+                break_force=5000.0, break_torque=500.0, cone_limit_deg=180.0
+            )
+
+
+def debug_paths(scene):
+    stage = omni.usd.get_context().get_stage()
+    for e in range(scene.num_envs):
+        env_ns = f"/World/envs/env_{e}"
+        print("ENV exists:", env_ns, stage.GetPrimAtPath(env_ns).IsValid())
+        for i in range(3):
+            stone = f"{env_ns}/Stone_{i}"   # 親なしで出しているなら f"{env_ns}/Stone_{i}"
+            joint = f"{env_ns}/Stone_{i}/Joint"
+            print(" stone:", stone, "->", stage.GetPrimAtPath(stone).IsValid())
+            print(" joint-parent:", os.path.dirname(joint), "->",
+                  stage.GetPrimAtPath(os.path.dirname(joint)).IsValid())
+
+
+
+def ensure_parent_xform(stage, prim_path: str):
+    parent = os.path.dirname(prim_path.rstrip("/"))
+    if parent and not stage.GetPrimAtPath(parent).IsValid():
+        UsdGeom.Xform.Define(stage, parent)
+
+
+def apply_physics_material_compat(prim, static_fric: float, dynamic_fric: float, restitution: float):
+    """
+    prim（Geom/Collision を持つ剛体）に対して、環境差を吸収して摩擦・反発を設定する。
+    優先順：
+      1) PhysxSchema.PhysxMaterialAPI を prim に直付け（メソッドあれば）
+      2) 直付けの raw 属性（'physxMaterial:staticFriction' など）を作成して Set
+      3) UsdPhysics.MaterialAPI の“別Prim”を作成し、binding リレーションを手書きで貼る
+    """
+    stage = prim.GetStage()
+
+    # --- (1) PhysxMaterialAPI で直付けできるか試す ---
+    try:
+        pmat = PhysxSchema.PhysxMaterialAPI.Apply(prim)
+        # メソッド名の有無で分岐（ビルド差吸収）
+        if hasattr(pmat, "CreateStaticFrictionAttr") and hasattr(pmat, "CreateDynamicFrictionAttr"):
+            pmat.CreateStaticFrictionAttr(float(static_fric))
+            pmat.CreateDynamicFrictionAttr(float(dynamic_fric))
+            if hasattr(pmat, "CreateRestitutionAttr"):
+                pmat.CreateRestitutionAttr(float(restitution))
+            else:
+                # 古い版では 'physxMaterial:restitution' を raw で作る
+                prim.CreateAttribute("physxMaterial:restitution", Sdf.ValueTypeNames.Float).Set(float(restitution))
+            return
+        elif hasattr(pmat, "CreateFrictionAttr"):
+            # 単一 friction の版（必要なら両方に同値を入れる）
+            pmat.CreateFrictionAttr(float(max(static_fric, dynamic_fric)))
+            if hasattr(pmat, "CreateRestitutionAttr"):
+                pmat.CreateRestitutionAttr(float(restitution))
+            else:
+                prim.CreateAttribute("physxMaterial:restitution", Sdf.ValueTypeNames.Float).Set(float(restitution))
+            return
+    except Exception:
+        pass
+
+    # --- (2) PhysX raw 属性を prim に直接作る ---
+    try:
+        prim.CreateAttribute("physxMaterial:staticFriction", Sdf.ValueTypeNames.Float).Set(float(static_fric))
+        prim.CreateAttribute("physxMaterial:dynamicFriction", Sdf.ValueTypeNames.Float).Set(float(dynamic_fric))
+        prim.CreateAttribute("physxMaterial:restitution",   Sdf.ValueTypeNames.Float).Set(float(restitution))
+        return
+    except Exception:
+        pass
+
+    # --- (3) UsdPhysics.MaterialAPI で別Primを作り、binding を手書き ---
+    try:
+        mat_path = prim.GetPath().pathString + "/PhysMaterial"
+        if not stage.GetPrimAtPath(mat_path).IsValid():
+            UsdGeom.Xform.Define(stage, mat_path)  # ダミー Prim でOK
+        mat = stage.GetPrimAtPath(mat_path)
+        mapi = UsdPhysics.MaterialAPI.Apply(mat)
+
+        if hasattr(mapi, "CreateStaticFrictionAttr"):
+            mapi.CreateStaticFrictionAttr(float(static_fric))
+            mapi.CreateDynamicFrictionAttr(float(dynamic_fric))
+            mapi.CreateRestitutionAttr(float(restitution))
+        else:
+            # 最後の手段：physics:material 名前空間で raw 属性
+            mat.CreateAttribute("physics:material:staticFriction", Sdf.ValueTypeNames.Float).Set(float(static_fric))
+            mat.CreateAttribute("physics:material:dynamicFriction", Sdf.ValueTypeNames.Float).Set(float(dynamic_fric))
+            mat.CreateAttribute("physics:material:restitution",    Sdf.ValueTypeNames.Float).Set(float(restitution))
+
+        # MaterialBindingAPI が無い環境用：リレーションを直接作る
+        rel = prim.CreateRelationship("physics:material:binding", False)
+        rel.SetTargets([Sdf.Path(mat_path)])
+        return
+    except Exception:
+        pass
+
+    print("[material] WARNING: failed to set physics material on", prim.GetPath())
+
+
+
+
+
+
+from pxr import UsdGeom, UsdPhysics, Gf, Sdf
+import omni.usd, math, random
+
+import re
+
+def _define_xform_safely(stage, path: str):
+    """
+    - 既に存在すれば何もしない
+    - 親階層にインスタンスが居ないかチェック
+    - 書き込み可能なレイヤ（RootLayer or SessionLayer）を EditTarget にして Define
+    """
+    if stage.GetPrimAtPath(path).IsValid():
+        return
+
+    # 親にインスタンスがいると子は作れない
+    p = Sdf.Path(path)
+    a = p.GetParentPath()
+    while a != Sdf.Path.absoluteRootPath:
+        prim = stage.GetPrimAtPath(a.pathString)
+        if prim and prim.IsInstance():
+            raise RuntimeError(f"cannot define under instance: {a}")
+        a = a.GetParentPath()
+
+    # 書けるレイヤを選ぶ
+    root = stage.GetRootLayer()
+    if root.permissionToEdit:
+        target_layer = root
+    else:
+        # ルートが書けない場合はセッションレイヤを書く（Omniverse ではここは書ける）
+        target_layer = stage.GetSessionLayer()
+
+    # 親から順に作る（中間パスが無いと失敗する版がある）
+    to_make = []
+    cur = Sdf.Path(path)
+    while cur != Sdf.Path.absoluteRootPath:
+        if not stage.GetPrimAtPath(cur.pathString).IsValid():
+            to_make.append(cur.pathString)
+        cur = cur.GetParentPath()
+    to_make.reverse()
+
+    with Usd.EditContext(stage, target_layer):
+        for pth in to_make:
+            UsdGeom.Xform.Define(stage, pth)
+
+
+def concretize_env_path(token_or_regex_path: str, env_id: int) -> str:
+    """
+    受け取ったパスが:
+      - "{ENV_REGEX_NS}/..."  あるいは "{{ENV_REGEX_NS}}/..."
+      - "/World/envs/env_.*/..."
+    のどれでも、"/World/envs/env_{env_id}/..." に具体化して返す。
+    それ以外はそのまま返す。
+    """
+    s = token_or_regex_path
+
+    # {ENV_REGEX_NS} / {{ENV_REGEX_NS}} → /World/envs/env_{id}
+    s = re.sub(r"^\{\{?ENV_REGEX_NS\}?\}", f"/World/envs/env_{env_id}", s)
+
+    # /World/envs/env_.*/... → /World/envs/env_{id}/...
+    s = re.sub(r"^/World/envs/env_\.\*", f"/World/envs/env_{env_id}", s)
+
+    return s
+
+
+
+
+
+
+# def attach_breakable_spherical_joints(scene, stones,
+#                                       break_force=(200.0, 400.0),     # [N]
+#                                       break_torque=(40.0, 80.0),      # [N·m]
+#                                       cone_deg=25.0,                   # 円錐角(±deg)
+#                                       anchor_local_pos0=(0.0, 0.0, 0.0),  # 石側のローカル基点
+#                                       seed=0):
+#     """
+#     - scene: InteractiveScene（envの数やenv名を持つ）
+#     - stones: RigidObjectCollection インスタンス
+#     - RigidObjectCollectionCfg の prim_path に {ENV_REGEX_NS} が入っている前提
+#     """
+#     rng = random.Random(seed)
+#     stage = omni.usd.get_context().get_stage()
+
+#     # ジョイント用のルート（インスタンス外）を用意
+#     joints_root = UsdGeom.Xform.Define(stage, Sdf.Path("/World/Joints")).GetPrim()
+
+#     # env_i の論理名（/World/envs/env_i）を作る小ユーティリティ
+#     def env_ns(i): 
+#         return f"/World/envs/env_{i}"
+
+#     # 量が多いので高速化
+#     # with Sdf.ChangeBlock():
+#     for ei in range(scene.num_envs):
+#         # 環境ごとにサブフォルダ
+#         env_joint_root = UsdGeom.Xform.Define(stage, Sdf.Path(f"/World/Joints/env_{ei}"))
+
+#         for idx, name in enumerate(stones.object_names):
+#             # RigidObjectCollectionCfg 側のパス式を実パスに解決
+#             expr = stones.cfg.rigid_objects[name].prim_path  # 例: "{ENV_REGEX_NS}/Stones/Stone_.*/Base"
+#             stone_path = expr.replace("{ENV_REGEX_NS}", env_ns(ei))
+
+#             # ジョイントprimはインスタンス外に作る
+#             jpath = f"/World/Joints/env_{ei}/{name}_joint_{idx:04d}"
+#             joint = UsdPhysics.SphericalJoint.Define(stage, Sdf.Path(jpath))
+
+#             # Body0=石、Body1(未設定)=World 拘束
+#             joint.CreateBody0Rel().SetTargets([Sdf.Path(stone_path)])
+#             # Body1 は意図的に設定しない
+
+#             # 破断しきい値（USD属性）
+#             jf = rng.uniform(*break_force)
+#             jt = rng.uniform(*break_torque)
+#             joint.CreateBreakForceAttr().Set(jf)
+#             joint.CreateBreakTorqueAttr().Set(jt)
+
+#             # アンカー（ローカルフレーム）
+#             joint.CreateLocalPos0Attr().Set(Gf.Vec3f(*anchor_local_pos0))
+#             joint.CreateLocalRot0Attr().Set(Gf.Quatf(1.0, 0.0, 0.0, 0.0))  # 単位クォータニオン
+#             # Body1はWorldなので LocalPos1/Rot1 は未設定のままでOK
+
+#             # 円錐角制限（rotY, rotZ を ±cone_deg に）
+#             for dof in ("rotY", "rotZ"):
+#                 lim = UsdPhysics.LimitAPI.Apply(joint.GetPrim(), dof)
+#                 lim.CreateLowAttr(-float(cone_deg))
+#                 lim.CreateHighAttr(+float(cone_deg))
+
+
+
+# def attach_joints_for_all_stones(scene, breakF_range=(150.0, 300.0), breakT_range=(20.0, 40.0)):
+#     import random
+#     stage = omni.usd.get_context().get_stage()
+#     stones = scene["stones"]
+
+#     with Sdf.ChangeBlock():  # 大量生成をバッチ化
+#         for env_id in range(scene.num_envs):
+#             env_ns = f"/World/envs/env_{env_id}"
+#             for name in stones.object_names:
+#                 stone_expr = stones.cfg.rigid_objects[name].prim_path  # "{ENV_REGEX_NS}/Stones/Stone_XXXX"
+#                 stone_path = concretize_env_path(stone_expr, env_id)
+
+#                 print(stone_expr, stone_path)
+
+#                 # stone_path = stone_expr.replace("{ENV_REGEX_NS}", env_ns)
+#                 add_breakable_spherical_joints(
+#                     stage, stone_path,
+#                     break_force=random.uniform(*breakF_range),
+#                     break_torque=random.uniform(*breakT_range),
+#                     cone_deg=8.0,
+#                 )
+
+
+
+
+def concretize_env_path(path_expr: str, env_id: int) -> str:
+    """{ENV_REGEX_NS} / {{ENV_REGEX_NS}} / /World/envs/env_.*/... を /World/envs/env_{env_id}/... に具体化"""
+    s = re.sub(r"^\{\{?ENV_REGEX_NS\}?\}", f"/World/envs/env_{env_id}", path_expr)
+    s = re.sub(r"^/World/envs/env_\.\*", f"/World/envs/env_{env_id}", s)
+    return s
+
+def ensure_prim_on_session(stage: Usd.Stage, path: str, type_name: str = "Xform"):
+    """RootLayerが書けなくても SessionLayer に直に Prim を定義。親チェーンも作る。"""
+    if stage.GetPrimAtPath(path).IsValid():
+        return
+    layer = stage.GetSessionLayer()
+    with Usd.EditContext(stage, layer):
+        # 親から順に
+        cur = Sdf.Path(path)
+        stack = []
+        while cur != Sdf.Path.absoluteRootPath:
+            if not stage.GetPrimAtPath(cur.pathString).IsValid():
+                stack.append(cur)
+            cur = cur.GetParentPath()
+        for p in reversed(stack):
+            UsdGeom.Xform.Define(stage, p)
+        # 目的の型に差し替え（Xformで十分なら不要）
+        if type_name != "Xform":
+            ps = layer.GetPrimAtPath(path)
+            if ps: ps.typeName = type_name
+
+# def add_breakable_joint_world(
+#     stage, stone_path: str,
+#     break_force: float, break_torque: float, cone_deg: float,
+#     local_anchor: Gf.Vec3f,
+#     joint_root="/Joints"
+# ):
+#     """Body0=石, Body1未設定(=World)。アンカーは「石ローカル(local_anchor)の世界座標」に一致させる。"""
+#     stone = stage.GetPrimAtPath(stone_path)
+#     if not stone or not stone.IsValid():
+#         print("[joint] missing:", stone_path); return False
+#     if stone.IsInstance():
+#         print("[joint] instance prim—cannot joint:", stone_path); return False
+
+#     # /Joints と /Joints/env_k を SessionLayerに作成
+#     parts = stone_path.split("/")
+#     # /World/envs/env_k/... を想定 → env_k を抽出
+#     env_name = parts[3] if len(parts) > 3 else "env_0"
+#     env_joint_dir = f"{joint_root}/{env_name}"
+#     ensure_prim_on_session(stage, joint_root, "Xform")
+#     ensure_prim_on_session(stage, env_joint_dir, "Xform")
+
+#     joint_path = f"{env_joint_dir}/{stone.GetName()}_Joint"
+#     if stage.GetPrimAtPath(joint_path).IsValid():
+#         stage.RemovePrim(joint_path)
+
+#     # ローカル→ワールド
+#     T_w = UsdGeom.Xformable(stone).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+#     p_world = Gf.Vec3f(Gf.Matrix4d(T_w).Transform(Gf.Vec3d(local_anchor)))
+
+#     # Joint を SessionLayer で定義
+#     with Usd.EditContext(stage, stage.GetSessionLayer()):
+#         j = UsdPhysics.SphericalJoint.Define(stage, joint_path)
+#         j.CreateBody0Rel().SetTargets([stone_path])           # Body1 未設定 = World 拘束
+#         j.CreateLocalPos0Attr().Set(local_anchor)             # 石ローカル
+#         j.CreateLocalRot0Attr().Set(Gf.Quatf(1,0,0,0))
+#         j.CreateLocalPos1Attr().Set(p_world)                  # World 側は世界座標をそのまま
+#         j.CreateLocalRot1Attr().Set(Gf.Quatf(1,0,0,0))
+#         j.CreateBreakForceAttr().Set(float(break_force))
+#         j.CreateBreakTorqueAttr().Set(float(break_torque))
+
+#         # 角度制限（環境依存だが、まず "angular" に Low/High（スカラ）で安定）
+#         lim = UsdPhysics.LimitAPI.Apply(j.GetPrim(), "angular")
+#         lim.CreateLowAttr().Set(0.0)
+#         lim.CreateHighAttr().Set(float(cone_deg))
+#         if hasattr(lim, "CreateEnabledAttr"): lim.CreateEnabledAttr().Set(True)
+#     return True
+
+# def attach_breakable_spherical_joints2(scene, stones,
+#                                       break_force=(200.0, 400.0),
+#                                       break_torque=(40.0, 80.0),
+#                                       cone_deg=25.0,
+#                                       anchor_local_pos0=(0.0, 0.0, 0.0),
+#                                       seed=0):
+#     rng = random.Random(seed)
+#     stage = omni.usd.get_context().get_stage()
+
+#     # Joint ルートはインスタンス外（SessionLayerに強制作成）
+#     ensure_prim_on_session(stage, "/Joints", "Xform")
+
+#     with Sdf.ChangeBlock():
+#         for ei in range(scene.num_envs):
+#             # RigidObjectCollection の各要素名を使って cfg から具体パスを得る
+#             for idx, name in enumerate(stones.object_names):
+#                 expr = stones.cfg.rigid_objects[name].prim_path
+#                 stone_path = concretize_env_path(expr, ei)
+
+#                 # ローカル支点（例：石底面の中心にしたいならここを (0,0,-h/2) に）
+#                 local_anchor = Gf.Vec3f(*anchor_local_pos0)
+
+#                 ok = add_breakable_joint_world(
+#                     stage,
+#                     stone_path=stone_path,
+#                     break_force=rng.uniform(*break_force),
+#                     break_torque=rng.uniform(*break_torque),
+#                     cone_deg=cone_deg,
+#                     local_anchor=local_anchor,
+#                     joint_root="/Joints"
+#                 )
+#                 if not ok:
+#                     # ここでログだけ出して継続（インスタンスだった等）
+#                     pass
+
+
+
+from pxr import Usd, Sdf
+import omni.usd
+import omni.kit.commands
+
+# def _deinstance_under(root_path: str):
+#     stage = omni.usd.get_context().get_stage()
+#     to_uninstance = []
+#     for prim in stage.Traverse():
+#         p = prim.GetPath().pathString
+#         if p.startswith(root_path) and prim.IsInstance():
+#             to_uninstance.append(prim.GetPath())
+#     if to_uninstance:
+#         omni.kit.commands.execute("UninstancePrims", paths=to_uninstance)
+
+# def _create_spherical_joint(stage, joint_path, body0_path, body1_path,
+#                             local_pos0=Gf.Vec3f(0,0,-0.12),
+#                             local_pos1=Gf.Vec3f(0,0,0),
+#                             break_force=600.0, break_torque=100.0):
+#     joint = UsdPhysics.SphericalJoint.Define(stage, Sdf.Path(joint_path))
+#     joint.CreateBody0Rel().SetTargets([Sdf.Path(body0_path)])
+#     joint.CreateBody1Rel().SetTargets([Sdf.Path(body1_path)])
+#     joint.CreateLocalPos0Attr().Set(local_pos0)
+#     joint.CreateLocalPos1Attr().Set(local_pos1)
+#     pj = PhysxSchema.PhysxJointAPI.Apply(joint.GetPrim())
+#     pj.CreateBreakForceAttr().Set(break_force)
+#     pj.CreateBreakTorqueAttr().Set(break_torque)
+
+# def wire_stones_after_spawn(env_index: int,
+#                             env_ns_template="/World/envs/env_{env}",
+#                             ground_rel="Terrain/ground",
+#                             stone_root_rel="fragile/Stones",
+#                             joints_root_rel="fragile/Joints"):
+#     """Call this AFTER stones are spawned."""
+#     stage = omni.usd.get_context().get_stage()
+#     env_ns = env_ns_template.format(env=env_index)
+#     stone_root = f"{env_ns}/{stone_root_rel}".rstrip("/")
+#     ground = f"{env_ns}/{ground_rel}".rstrip("/")
+#     joints_root = f"{env_ns}/{joints_root_rel}".rstrip("/")
+
+#     # 1) デインスタンス（CollectionCfgで生成された石を個別化）
+#     _deinstance_under(stone_root)
+
+#     # 2) 石のルート候補を列挙（必要なら型フィルタを調整）
+#     stones = []
+#     for prim in stage.Traverse():
+#         p = prim.GetPath().pathString
+#         if p.startswith(stone_root + "/") and prim.GetTypeName() in ("Xform","Mesh","Cube","Sphere","Capsule"):
+#             stones.append(p)
+
+#     if not stage.GetPrimAtPath(joints_root):
+#         stage.DefinePrim(Sdf.Path(joints_root), "Xform")
+
+#     # 3) 各石に Joint を作成
+#     for i, stone in enumerate(stones):
+#         jp = f"{joints_root}/joint_{i:04d}"
+#         _create_spherical_joint(stage, jp, stone, ground)
+
+
+
+def _has_any_rigid(prim):
+    try:
+        return prim.HasAPI(UsdPhysics.RigidBodyAPI) or prim.HasAPI(PhysxSchema.PhysxRigidBodyAPI)
+    except Exception:
+        return prim.HasAPI(UsdPhysics.RigidBodyAPI)
+
+def _world_xform(stage, path):
+    return UsdGeom.Xformable(stage.GetPrimAtPath(path)).ComputeLocalToWorldTransform(0)
+
+
+from pxr import Sdf
+
+def _set_if_exists(prim, attr_name, value, sdf_type):
+    """その属性が prim に存在する場合だけ Set する"""
+    a = prim.GetAttribute(attr_name)
+    if a:
+        a.Set(value)
+        return True
+    return False
+
+def enable_projection_if_supported(joint_prim):
+    # よくある名前を順番に試す（どれかが True になればOK）
+    ok = False
+    ok |= _set_if_exists(joint_prim, "physxJoint:enableProjection", True,  Sdf.ValueTypeNames.Bool)
+    ok |= _set_if_exists(joint_prim, "physx:enableProjection",      True,  Sdf.ValueTypeNames.Bool)
+    # まれに使われる別名（存在すれば）
+    ok |= _set_if_exists(joint_prim, "physxJoint:projectionEnabled", True, Sdf.ValueTypeNames.Bool)
+    ok |= _set_if_exists(joint_prim, "physx:projectionEnabled",      True, Sdf.ValueTypeNames.Bool)
+
+    # トレランスも同様に（存在する方だけ）
+    _set_if_exists(joint_prim, "physxJoint:projectionLinearTolerance",  0.05, Sdf.ValueTypeNames.Float)
+    _set_if_exists(joint_prim, "physx:projectionLinearTolerance",       0.05, Sdf.ValueTypeNames.Float)
+    _set_if_exists(joint_prim, "physxJoint:projectionAngularTolerance", 45.0, Sdf.ValueTypeNames.Float)
+    _set_if_exists(joint_prim, "physx:projectionAngularTolerance",      45.0, Sdf.ValueTypeNames.Float)
+    return ok
+
+# def _create_locklike_spherical_joint(stage, joint_path, body0_path, body1_path=None,
+#                                      # ★ 引数を追加
+#                                      local0_pos: Gf.Vec3f = Gf.Vec3f(0,0,0),
+#                                      local1_pos: Gf.Vec3f = Gf.Vec3f(0,0,0)):
+#     # j = UsdPhysics.SphericalJoint.Define(stage, Sdf.Path(joint_path)) #sphere
+#     j = UsdPhysics.PrismaticJoint.Define(stage, Sdf.Path(joint_path)) #prismatic
+
+#     j.CreateBody0Rel().SetTargets([Sdf.Path(body0_path)])
+    
+#     # ★★★ 修正点 1: Body1 を明示的に /World に設定 ★★★
+#     if body1_path:
+#         j.CreateBody1Rel().SetTargets([Sdf.Path(body1_path)])
+#     # else:
+#     #     # body1_path が None の場合は、/World をターゲットにする
+#         j.CreateBody1Rel().SetTargets([Sdf.Path("/World")])
+
+#     # ★★★ 修正点 2: 引数を使う ★★★
+#     # アンカー：石ローカル側 (計算済みの値)
+#     j.CreateLocalPos0Attr().Set(local0_pos)
+#     # アンカー：ワールド側 (計算済みの値)
+#     j.CreateLocalPos1Attr().Set(local1_pos)
+    
+#     # 回転は (1,0,0,0) で初期化
+#     # j.CreateLocalRot0Attr().Set(Gf.Quatf(1.0, 0.0, 0.0, 0.0))
+#     # j.CreateLocalRot1Attr().Set(Gf.Quatf(1.0, 0.0, 0.0, 0.0))
+
+#     # 破断設定 (この部分は元のままでOK)
+#     # if hasattr(j, "CreateConeAngle0Attr"): j.CreateConeAngle0Attr().Set(5.0)
+#     # if hasattr(j, "CreateConeAngle1Attr"): j.CreateConeAngle1Attr().Set(5.0)
+
+#     j.CreateLowerLimitAttr().Set(0)
+#     j.CreateUpperLimitAttr().Set(0)
+
+#     # 1. 破断設定 (Break) は UsdPhysics.Joint (j) に直接設定します
+#     j.CreateBreakForceAttr().Set(float("1e12"))
+#     j.CreateBreakTorqueAttr().Set(float("1e12"))
+
+
+#     # (オプション: 角度制限も UsdPhysics (j) 側で設定するのが一般的です)
+#     # lim = UsdPhysics.LimitAPI.Apply(j.GetPrim(), "angular")
+#     # lim.CreateLowAttr().Set(0.0)
+#     # lim.CreateHighAttr().Set(float(90))
+#     # if hasattr(lim, "CreateEnabledAttr"):
+#     #     lim.CreateEnabledAttr().Set(True)
+
+#     # cone = UsdPhysics.ConeLimitAPI.Apply(j.GetPrim(), "angular")
+#     # cone.CreateAngleAttr().Set(8.0)           # 例: 8°
+#     # # ある環境では EnableAttr がある場合のみ
+#     # if hasattr(cone, "CreateEnabledAttr"):
+#     #     cone.CreateEnabledAttr().Set(True)
+
+#     # stone_prim = stage.GetPrimAtPath(body0_path)
+#     # stone_prim.CreateAttribute("physics:angularDamping", Sdf.ValueTypeNames.Float).Set(1.0)
+#     # stone_prim.CreateAttribute("physics:linearDamping",  Sdf.ValueTypeNames.Float).Set(1.05)
+
+
+# def _xform_world(stage, path):
+#     return UsdGeom.Xformable(stage.GetPrimAtPath(path)).ComputeLocalToWorldTransform(0)
+
+# def _to_local_point(T_world_of_frame, p_world_vec3f):
+#     return T_world_of_frame.GetInverse().Transform(Gf.Vec3f(p_world_vec3f))
+
+# def _create_spherical_to_world(stage, joint_path, body0_path,
+#                                local0_pos=Gf.Vec3f(0,0,-0.12)):
+#     # 1) joint 定義（Body1 は作らない＝世界固定）
+#     j = UsdPhysics.SphericalJoint.Define(stage, Sdf.Path(joint_path))
+#     j.CreateBody0Rel().SetTargets([Sdf.Path(body0_path)])
+
+#     # 2) アンカーの世界座標（body0 ローカル → 世界）
+#     T_w_b0 = _xform_world(stage, body0_path)
+#     anchor_world = T_w_b0.Transform(local0_pos)   # Gf.Vec3f
+
+#     # 3) joint の “親” ローカルに変換して translate を設定
+#     joint_prim = j.GetPrim()
+#     parent_prim = joint_prim.GetParent()
+#     T_w_parent = _xform_world(stage, parent_prim.GetPath().pathString)
+#     translate_in_parent = _to_local_point(T_w_parent, anchor_world)  # ← これが重要
+#     UsdGeom.XformCommonAPI(joint_prim).SetTranslate(Gf.Vec3d(translate_in_parent))
+
+#     # 4) ローカルアンカー
+#     j.CreateLocalPos0Attr().Set(local0_pos)       # body0 側
+#     j.CreateLocalPos1Attr().Set(Gf.Vec3f(0,0,0))  # 世界固定側は joint 原点
+
+#     # 角度制限（属性があれば）
+#     if hasattr(j, "CreateConeAngle0Attr"): j.CreateConeAngle0Attr().Set(5.0)
+#     if hasattr(j, "CreateConeAngle1Attr"): j.CreateConeAngle1Attr().Set(5.0)
+
+
+GROUP = 1
+MASK32 = 0xFFFFFFFE   # (= ~1 & 0xFFFFFFFF)
+
+def _apply_group_mask_to_shapes_under(stage, rigid_root_path: str):
+    n = 0
+    root = stage.GetPrimAtPath(rigid_root_path)
+    if not root: return 0
+    for p in Usd.PrimRange.AllPrims(root):
+        if p.HasAPI(UsdPhysics.CollisionAPI):
+            # 既存が Int なら 16bit へフォールバック（下のBに委ねる）
+            a = p.GetAttribute("physxCollision:mask")
+            if a and a.GetTypeName() == Sdf.ValueTypeNames.Int:
+                _apply_group_mask_16bit(p)  # ←下で定義
+            else:
+                # group/mask を UInt で作成
+                p.CreateAttribute("physxCollision:group", Sdf.ValueTypeNames.UInt).Set(GROUP)
+                p.CreateAttribute("physxCollision:mask",  Sdf.ValueTypeNames.UInt).Set(MASK32)
+                # 互換名も一応セット
+                p.CreateAttribute("physxCollision:filterGroup", Sdf.ValueTypeNames.UInt).Set(GROUP)
+                p.CreateAttribute("physxCollision:filterMask",  Sdf.ValueTypeNames.UInt).Set(MASK32)
+            n += 1
+    return n
+
+def _apply_group_mask_16bit(shape_prim):
+    """既に Int型で作られている等、UIntが使えない場合のフォールバック"""
+    from pxr import Sdf
+    GROUP = 1
+    MASK16 = 0xFFFE      # (= ~1 & 0xFFFF) → Int で安全に入る
+    shape_prim.CreateAttribute("physxCollision:group", Sdf.ValueTypeNames.Int).Set(GROUP)
+    shape_prim.CreateAttribute("physxCollision:mask",  Sdf.ValueTypeNames.Int).Set(MASK16)
+    # 互換名
+    shape_prim.CreateAttribute("physxCollision:filterGroup", Sdf.ValueTypeNames.Int).Set(GROUP)
+    shape_prim.CreateAttribute("physxCollision:filterMask",  Sdf.ValueTypeNames.Int).Set(MASK16)
+
+
+# def wire_env_stones(env_index: int,
+#                     env_origin_offset: Gf.Vec3f,
+#                     env_ns_template="/World/envs/env_{env}",
+#                     stone_name_prefix="Stone_",
+#                     joints_root_rel="fragile/Joints",
+#                     ground_rel=None):  # None=世界固定
+#     stage = omni.usd.get_context().get_stage()
+#     env_ns = env_ns_template.format(env=env_index).rstrip("/")
+#     joints_root = f"{env_ns}/{joints_root_rel}".rstrip("/")
+
+
+#     # 書込み先はRootLayer
+#     stage.SetEditTarget(Usd.EditTarget(stage.GetRootLayer()))
+
+#     # 石を列挙：env直下の子で、名前が Stone_* かつ RigidBody を持つもの
+#     env_prim = stage.GetPrimAtPath(env_ns)
+#     stones = []
+#     for c in env_prim.GetChildren():
+#         name = c.GetName()
+#         if not name.startswith(stone_name_prefix):
+#             continue
+#         if _has_any_rigid(c):
+#             stones.append(c.GetPath().pathString)
+
+#     if not stones:
+#         print(f"[wire] no stones matched under {env_ns} with prefix '{stone_name_prefix}'")
+#         return
+
+#     # joints 置き場
+#     if not stage.GetPrimAtPath(joints_root):
+#         stage.DefinePrim(Sdf.Path(joints_root), "Xform")
+
+#     # 1. 石のローカルアンカー (底面)
+#     local0_pos_vec = Gf.Vec3f(0, 0, -0.12) # (変更なし)
+
+#     # 2. 親である「環境」のローカルトランスフォーム（オフセット）を取得
+#     env_xform = UsdGeom.Xformable(env_prim)
+#     # GetLocalTransformation は親(/World)からの相対的な変位 (オフセット) を返す
+#     # env_local_matrix = env_xform.GetLocalTransformation(Usd.TimeCode.Default())
+#     # env_local_matrix_d = Gf.Matrix4d(env_local_matrix) # double精度に
+
+
+#     # 作成
+#     # ★ 渡された信頼できるオフセットを行列に変換
+#     env_offset_matrix_d = Gf.Matrix4d(1.0).SetTranslate(Gf.Vec3d(env_origin_offset))
+
+#     # group_path = f"{env_ns}/CollisionGroups/Stones"           # envごとに分ける例
+#     # grp = UsdPhysics.CollisionGroup.Define(stage, Sdf.Path(group_path))
+#     # to_include = [] 
+
+#     shape_count = 0 
+
+#     # 作成
+#     for i, stone_path_str in enumerate(stones):
+#         jp = f"{joints_root}/joint_{i:04d}"
+        
+#         stone_prim = stage.GetPrimAtPath(stone_path_str)
+#         if not stone_prim.IsValid(): continue
+
+#         # 3. 石のローカルトランスフォーム (親 env_prim からの相対)
+#         # (これは信頼できる)
+#         stone_xform = UsdGeom.Xformable(stone_prim)
+#         stone_local_matrix = stone_xform.GetLocalTransformation(Usd.TimeCode.Default())
+#         stone_local_matrix_d = Gf.Matrix4d(stone_local_matrix)
+
+#         # 4. 石の「正しい」ワールドトランスフォームを合成
+#         #    world_transform = (石のローカル) * (envの信頼できるオフセット)
+#         xf_matrix = stone_local_matrix_d * env_offset_matrix_d
+
+#         # 5. 石のローカルアンカーを「正しい」ワールド座標に変換
+#         world1_pos_vec_double = xf_matrix.Transform(Gf.Vec3d(local0_pos_vec))
+#         world1_pos_vec = Gf.Vec3f(world1_pos_vec_double)
+
+#         # 6. ジョイント作成 (計算した値を渡す)
+#         # (前回No.42で定義した _create_locklike_spherical_joint を呼ぶ)
+#         _create_locklike_spherical_joint(
+#             stage = stage, 
+#             joint_path = jp, 
+#             body0_path = stone_path_str,                       # (None が渡される)
+#             local0_pos=local0_pos_vec,   # 石のローカル側
+#             local1_pos=world1_pos_vec    # ★計算した正しいワールド側
+#         )
+
+#         # ★ 衝突無効化のために、グループへ追加する対象を集める
+#         # to_include.append(Sdf.Path(stone_path_str))
+
+#         shape_count += _apply_group_mask_to_shapes_under(stage, stone_path_str)
+        
+#     print(f"[wire] joints created: {len(stones)}  env={env_ns} ")
+
+#     # # ループの後で一括設定（SetTargets は上書きなので一度にやるのが安全）
+#     # includes = grp.GetIncludesRel()
+#     # includes.SetTargets(to_include)
+
+#     # # 同一グループ同士の衝突を無効化（自己参照をフィルタに設定）
+#     # filtered = grp.GetFilteredGroupsRel()
+#     # filtered.SetTargets([Sdf.Path(group_path)])
+
+
+
+# def disable_stone_to_stone_collision(stage, stone_paths, group_path):
+#     grp = UsdPhysics.CollisionGroup.Define(stage, Sdf.Path(group_path))
+
+#     # includes に石を登録（関係が未作成でも Get...Rel() で取得→SetTargets すればOK）
+#     includes = grp.GetIncludesRel()
+#     includes.SetTargets([Sdf.Path(p) for p in stone_paths])
+
+#     # 同一グループ同士の衝突を無効化（自己参照）
+#     filtered = grp.GetFilteredGroupsRel()
+#     filtered.SetTargets([Sdf.Path(group_path)])
+
+
+
+def disable_collisions(scene, stones, group_path="/World/CollisionGroups/stone_group"):
+    """
+    - scene: InteractiveScene
+    - stones: RigidObjectCollection（大量の石）
+    """
+    stage = omni.usd.get_context().get_stage()
+
+    # 1) 衝突グループ prim を作成（インスタンス外に置く）
+    group = UsdPhysics.CollisionGroup.Define(stage, Sdf.Path(group_path))
+    coll_api = group.GetCollidersCollectionAPI()  # UsdCollectionAPI
+    includes_rel = coll_api.GetIncludesRel()
+
+    # 2) 全環境・全石から「CollisionAPI が付いている prim」を集め、コレクションに追加
+    def env_ns(i): return f"/World/envs/env_{i}"
+    with Sdf.ChangeBlock():
+        for ei in range(scene.num_envs):
+            for name in stones.object_names:
+                # RigidObjectCollectionCfg の prim_path から実パスに解決
+                expr = stones.cfg.rigid_objects[name].prim_path  # 例: "{ENV_REGEX_NS}/Stones/Stone_0001"
+                stone_root = stage.GetPrimAtPath(expr.replace("{ENV_REGEX_NS}", env_ns(ei)))
+                if not stone_root or not stone_root.IsValid():
+                    continue
+                # 石配下の「CollisionAPI を持つ prim」を列挙して includes に登録
+                for p in Usd.PrimRange(stone_root):
+                    if p.HasAPI(UsdPhysics.CollisionAPI):
+                        includes_rel.AddTarget(p.GetPath())
+
+        # 3) グループに「自分自身」をフィルタ対象として登録 → グループ内衝突を無効化
+        group.GetFilteredGroupsRel().AddTarget(group.GetPrim().GetPath())
+
+
+
+def _iter_colliders_under(stage, root_path):
+    root = stage.GetPrimAtPath(root_path)
+    if not root or not root.IsValid():
+        return
+    # ★ instance proxy も横断
+    for p in Usd.PrimRange(root, Usd.TraverseInstanceProxies()):
+        if p.HasAPI(UsdPhysics.CollisionAPI):
+            yield p.GetPath()
+
+# def build_stone_collision_group(scene, stones, group_path="/World/CollisionGroups/stone_group"):
+#     """
+#     stones: RigidObjectCollection（大量の飛び石）
+#     """
+#     stage = omni.usd.get_context().get_stage()
+#     group = UsdPhysics.CollisionGroup.Define(stage, Sdf.Path(group_path))
+#     includes_rel = group.GetCollidersCollectionAPI().GetIncludesRel()
+
+#     def env_ns(i): return f"/World/envs/env_{i}"
+#     with Usd.EditContext(stage, stage.GetEditTarget()), Sdf.ChangeBlock():
+#         includes_rel.ClearTargets()
+#         for ei in range(scene.num_envs):
+#             for name in stones.object_names:
+#                 expr = stones.cfg.rigid_objects[name].prim_path
+#                 stone_root = expr.replace("{ENV_REGEX_NS}", env_ns(ei))
+#                 for coll_path in _iter_colliders_under(stage, stone_root):
+#                     includes_rel.AddTarget(coll_path)
+
+#     # グループ内衝突を禁止（A vs A）
+#     group.GetFilteredGroupsRel().AddTarget(group.GetPrim().GetPath())
+
+
+
+def build_stone_collision_group(scene, stones, group_path="/World/CollisionGroups/stone_group"):
+    stage = omni.usd.get_context().get_stage()
+    # stage.SetEditTarget(Usd.EditTarget(stage.GetRootLayer()))
+
+    grp = UsdPhysics.CollisionGroup.Define(stage, Sdf.Path(group_path))
+    includes_rel = grp.GetCollidersCollectionAPI().GetIncludesRel()
+
+    def env_ns(i): return f"/World/envs/env_{i}"
+
+    # 収集して最後に一括 SetTargets
+    targets = []
+    for ei in range(scene.num_envs):
+        for name in stones.object_names:
+            expr = stones.cfg.rigid_objects[name].prim_path
+            stone_root = expr.replace("{ENV_REGEX_NS}", env_ns(ei))
+
+            # stone_roots = list_actual_stones(env_ns(ei))
+
+            for coll_path in _iter_colliders_under(stage, stone_root):
+                targets.append(coll_path)
+
+            # uninstance_all(stone_roots)
+
+            # created = sum(ensure_collision_shapes_under(p) for p in stone_roots)
+            # print(f"[colliders] created={created}")
+
+            # d) 実体の衝突Shapeを集める
+            # shape_paths = collect_real_shapes(stage, stone_roots)
+
+            # # e) CollisionGroup（効く版ならここで件数が>0になる）
+            # set_collision_group(stage, "/World/CollisionGroups/stone_group", shape_paths)
+
+
+
+    # ここが修正ポイント
+    includes_rel.SetTargets(targets)         # ← ClearTargetsは不要
+    # try:
+    grp.GetFilteredGroupsRel().SetTargets([grp.GetPrim().GetPath()])
+
+
+    # debug_count_colliders_in_group(stage, group_path)
+
+    diag_collision_group(stage, group_path)
+
+    # except Exception:
+    #     pass
+
+
+def list_actual_stones(env_path:str, name_prefix="Stone_"):
+    """env直下の Stone_* で RigidBody を持つものを列挙"""
+    stage = omni.usd.get_context().get_stage()
+    env = stage.GetPrimAtPath(env_path)
+    out = []
+    for c in env.GetChildren():
+        if c.GetName().startswith(name_prefix) and c.HasAPI(UsdPhysics.RigidBodyAPI):
+            out.append(c.GetPath().pathString)
+    print(f"[stones] env={env_path} found={len(out)}")
+    return out
+
+
+import omni.kit.commands as okc
+from pxr import Usd, UsdPhysics, Sdf
+
+def uninstance_all(paths):
+    if paths:
+        okc.execute("UninstancePrims", paths=[p for p in paths])
+
+def ensure_collision_shapes_under(root_path:str) -> int:
+    """見えるジオメトリに CollisionAPI を適用（無ければ作る）。作成数を返す"""
+    stage = omni.usd.get_context().get_stage()
+    root = stage.GetPrimAtPath(root_path)
+    made = 0
+    for p in Usd.PrimRange.AllPrims(root):
+        t = p.GetTypeName()
+        if t in ("Mesh","Cube","Sphere","Capsule","Cylinder"):
+            if not p.HasAPI(UsdPhysics.CollisionAPI):
+                UsdPhysics.CollisionAPI.Apply(p)
+                p.CreateAttribute("physics:approximation", Sdf.ValueTypeNames.Token).Set("convexHull")
+                made += 1
+    return made
+
+
+
+
+
+
+
+
+def _iter_collider_paths2(stage: Usd.Stage, root_prim_path: str):
+    """root_prim_path 配下の『CollisionAPI を持つ prim』を、インスタンス配下も含めて列挙。"""
+    root = stage.GetPrimAtPath(root_prim_path)
+    if not root or not root.IsValid():
+        return
+    # ★ インスタンス配下も横断（TraverseInstanceProxies）
+    queue = [root]
+    while queue:
+        p = queue.pop(0)
+        # CollisionAPI が付いた prim だけを登録対象にするのが仕様
+        if p.HasAPI(UsdPhysics.CollisionAPI):
+            yield p.GetPath()
+        # インスタンス配下まで含めて子を列挙
+        for c in p.GetFilteredChildren(Usd.TraverseInstanceProxies()):
+            queue.append(c)
+
+def build_stone_collision_group2(scene, stones, group_path="/World/CollisionGroups/stone_group"):
+    """
+    - scene: InteractiveScene
+    - stones: RigidObjectCollection（大量の飛び石）
+    """
+    stage = omni.usd.get_context().get_stage()
+    group = UsdPhysics.CollisionGroup.Define(stage, Sdf.Path(group_path))
+    coll_api = group.GetCollidersCollectionAPI()
+    includes_rel = coll_api.GetIncludesRel()
+
+    # '{ENV_REGEX_NS}' を「環境正規表現」に展開（例: /World/envs/env_.*）
+    env_regex = "/World/envs/env_.*"
+
+    # まず空にしてから、全コライダ prim を includes に追加
+    # includes_rel.ClearTargets()
+    targets = []
+    with Usd.EditContext(stage, stage.GetEditTarget()), Sdf.ChangeBlock():
+        for name, ro_cfg in stones.cfg.rigid_objects.items():
+            # ro_cfg.prim_path は正規表現である可能性がある
+            expr = ro_cfg.prim_path.replace("{ENV_REGEX_NS}", env_regex)
+            # 1) 正規表現を『実パス』群に解決（Isaac Lab のユーティリティを使用）
+            stone_root_paths = sim_utils.find_matching_prim_paths(expr, stage)
+            # 2) 各 root の配下から CollisionAPI を持つ prim を収集
+            for root_path in stone_root_paths:
+                for coll_path in _iter_collider_paths2(stage, root_path):
+                    # includes_rel.AddTarget(coll_path)
+                    targets.append(coll_path)
+
+        # 3) 自己フィルタを入れる → 同一グループ内の衝突を遮断（石⇔石が切れる）
+        # group.GetFilteredGroupsRel().ClearTargets()
+        includes_rel.SetTargets(targets)  
+        group.GetFilteredGroupsRel().SetTargets([group.GetPrim().GetPath()])
+        # group.GetFilteredGroupsRel().AddTarget(group.GetPrim().GetPath())
+
+    # --- デバッグ: 何件入ったか可視化（0 件ならどこかで見落とし）
+    q = coll_api.ComputeMembershipQuery()
+    count = 0
+    for p in Usd.PrimRange(stage.GetPseudoRoot(), Usd.TraverseInstanceProxies()):
+        if p.HasAPI(UsdPhysics.CollisionAPI) and q.IsPathIncluded(p.GetPath()):
+            count += 1
+    print(f"[stone_group] registered colliders = {count}")
+
+    diag_collision_group(stage, group_path)
+
+
+
+
+
+def probe(root):
+    exist=proxy=real_no_col=real_col=0
+    for p in Usd.PrimRange.AllPrims(stage.GetPrimAtPath(root)):
+        if not p or not p.IsValid(): continue
+        exist+=1
+        if p.IsInstanceProxy():
+            proxy+=1
+        else:
+            if p.HasAPI(UsdPhysics.CollisionAPI): real_col+=1
+            else: real_no_col+=1
+    print(f"[probe] exist={exist} proxy={proxy} real_no_col={real_no_col} real+CollisionAPI={real_col}")
+
+
+
+
+
+def collect_real_shapes(stage, stone_roots):
+    shapes = []
+    for rp in stone_roots:
+        root = stage.GetPrimAtPath(rp)
+        for p in Usd.PrimRange.AllPrims(root):
+            if (not p.IsInstanceProxy()) and p.HasAPI(UsdPhysics.CollisionAPI):
+                shapes.append(p.GetPath())
+    print(f"[collect] shapes={len(shapes)}")
+    return shapes
+
+def set_collision_group(stage, group_path, shape_paths):
+    grp = UsdPhysics.CollisionGroup.Define(stage, Sdf.Path(group_path))
+    rel = grp.GetCollidersCollectionAPI().GetIncludesRel()
+    rel.SetTargets(shape_paths)  # ←一括上書き
+    try:
+        grp.GetFilteredGroupsRel().SetTargets([grp.GetPrim().GetPath()])  # 自己参照で同士無効
+    except Exception:
+        pass
+    # デバッグ
+    q = grp.GetCollidersCollectionAPI().ComputeMembershipQuery()
+    cnt = 0
+    for p in Usd.PrimRange(stage.GetPseudoRoot()):
+        if p.HasAPI(UsdPhysics.CollisionAPI) and q.IsPathIncluded(p.GetPath()):
+            cnt += 1
+    print(f"[cg] membership={cnt}")
+
+def force_physx_filtered_pairs(stage, shape_paths):
+    scene_prim = stage.GetPrimAtPath("/World/physicsScene") or next(
+        (p for p in stage.Traverse() if p.GetTypeName()=="PhysicsScene"), None)
+    if not scene_prim:
+        print("[physx] no PhysicsScene"); return
+    api = PhysxSchema.PhysxSceneAPI.Apply(scene_prim)
+    rel = api.GetPrim().GetRelationship("physx:filteredPairs") or api.GetPrim().CreateRelationship("physx:filteredPairs")
+    flat=[]; N=len(shape_paths)
+    for i in range(N):
+        a=Sdf.Path(shape_paths[i])
+        for j in range(i+1,N):
+            b=Sdf.Path(shape_paths[j]); flat.extend([a,b])
+    rel.SetTargets(flat)
+    print(f"[physx] filteredPairs set: {len(flat)//2} pairs")
+
+
+
+
+def debug_count_colliders_in_group(stage, group_path):
+    group = UsdPhysics.CollisionGroup.Get(stage, Sdf.Path(group_path))
+    coll_api = group.GetCollidersCollectionAPI()
+    # 収集結果の解決（コレクション）
+    q = coll_api.ComputeMembershipQuery()
+    count = 0
+    for p in Usd.PrimRange(stage.GetPseudoRoot(), Usd.TraverseInstanceProxies()):
+        if p.HasAPI(UsdPhysics.CollisionAPI) and q.IsPathIncluded(p.GetPath()):
+            count += 1
+    print(f"[CollisionGroup] members = {count}")
+
+
+
+
+def diag_collision_group(stage, group_path):
+    grp = UsdPhysics.CollisionGroup.Get(stage, Sdf.Path(group_path))
+    if not grp:
+        print("[diag] group not found:", group_path); return
+    coll_api = grp.GetCollidersCollectionAPI()
+    rel = coll_api.GetIncludesRel()
+    targets = rel.GetTargets()
+    print(f"[diag] includes targets authored: {len(targets)}")
+    if targets[:5]:
+        print("       first targets:", [str(t) for t in targets[:5]])
+
+    # 実体/Proxy/CollisionAPI の内訳
+    n_exist = n_proxy = n_real = n_collision = 0
+    for t in targets:
+        p = stage.GetPrimAtPath(t)
+        if not p or not p.IsValid(): 
+            continue
+        n_exist += 1
+        if p.IsInstanceProxy():
+            n_proxy += 1
+        else:
+            n_real += 1
+            if p.HasAPI(UsdPhysics.CollisionAPI):
+                n_collision += 1
+    print(f"[diag] exist={n_exist}, proxy={n_proxy}, real={n_real}, real+CollisionAPI={n_collision}")
+
+    # 最終的に membership に入っている数
+    q = coll_api.ComputeMembershipQuery()
+    m = 0
+    for p in Usd.PrimRange(stage.GetPseudoRoot()):
+        if p.HasAPI(UsdPhysics.CollisionAPI) and q.IsPathIncluded(p.GetPath()):
+            m += 1
+    print(f"[diag] membership (resolved) = {m}")
+
+
+
+# def _uninstance_stones_under(stage, env_path: str, stone_prefix="Stone_"):
+#     """env 直下の Stone_* をデインスタンス（インスタンス→実体化）"""
+#     env = stage.GetPrimAtPath(env_path)
+#     if not env: return 0
+#     to_uninst = []
+#     for c in env.GetChildren():
+#         if c.GetName().startswith(stone_prefix) and c.IsInstance():
+#             to_uninst.append(c.GetPath())
+#     if to_uninst:
+#         okc.execute("UninstancePrims", paths=to_uninst)
+#     return len(to_uninst)
+
+# def _iter_real_colliders_under(stage, root_path: str):
+#     """CollisionAPI を持つ“実体”shape だけ列挙（proxy 除外）"""
+#     root = stage.GetPrimAtPath(root_path)
+#     if not root: return []
+#     out = []
+#     for p in Usd.PrimRange.AllPrims(root):
+#         if p and (not p.IsInstanceProxy()) and p.HasAPI(UsdPhysics.CollisionAPI):
+#             out.append(p.GetPath())
+#     return out
+
+# def _force_physx_filtered_pairs(stage, shape_paths):
+#     """保険：PhysX シーンの filteredPairs に石同士の全ペアをセット"""
+#     scene_prim = stage.GetPrimAtPath("/World/physicsScene") or next(
+#         (p for p in stage.Traverse() if p.GetTypeName()=="PhysicsScene"), None)
+#     if not scene_prim: 
+#         print("[physx] no PhysicsScene; skipped"); 
+#         return
+#     api = PhysxSchema.PhysxSceneAPI.Apply(scene_prim)
+#     rel = api.GetPrim().GetRelationship("physx:filteredPairs") or api.GetPrim().CreateRelationship("physx:filteredPairs")
+#     pairs_flat = []
+#     N = len(shape_paths)
+#     for i in range(N):
+#         a = Sdf.Path(shape_paths[i])
+#         for j in range(i+1, N):
+#             b = Sdf.Path(shape_paths[j])
+#             pairs_flat.extend([a, b])
+#     rel.SetTargets(pairs_flat)
+#     print(f"[physx] filteredPairs set: {len(pairs_flat)//2} pairs")
+
+# def build_stone_collision_group(scene, stones, group_path="/World/CollisionGroups/stone_group"):
+#     stage = omni.usd.get_context().get_stage()
+#     stage.SetEditTarget(Usd.EditTarget(stage.GetRootLayer()))
+
+#     # 1) 各 env をデインスタンス
+#     total_uninst = 0
+#     for ei in range(scene.num_envs):
+#         env_path = f"/World/envs/env_{ei}"
+#         total_uninst += _uninstance_stones_under(stage, env_path, stone_prefix="Stone_")
+#     if total_uninst:
+#         print(f"[cg] uninstanced {total_uninst} stone prims")
+
+#     # 2) 実体コライダ（Shape）を収集
+#     def env_ns(i): return f"/World/envs/env_{i}"
+#     shape_targets = []
+#     for ei in range(scene.num_envs):
+#         for name in stones.object_names:
+#             expr = stones.cfg.rigid_objects[name].prim_path  # 例 "{ENV_REGEX_NS}/Stone_0000"
+#             stone_root = expr.replace("{ENV_REGEX_NS}", env_ns(ei))
+#             shape_targets += _iter_real_colliders_under(stage, stone_root)
+
+#     print(f"[cg] collected shapes: {len(shape_targets)}")
+
+#     # 3) CollisionGroup に一括登録（この版は includes/filteredGroups が動く場合のみ有効）
+#     # try:
+#     grp = UsdPhysics.CollisionGroup.Define(stage, Sdf.Path(group_path))
+#     includes_rel = grp.GetCollidersCollectionAPI().GetIncludesRel()
+#     includes_rel.SetTargets(shape_targets)
+#     # 自己参照で“同士を無効化”
+#     grp.GetFilteredGroupsRel().SetTargets([grp.GetPrim().GetPath()])
+#     # デバッグ：メンバー数を確認
+#     q = grp.GetCollidersCollectionAPI().ComputeMembershipQuery()
+#     cnt = 0
+#     for p in Usd.PrimRange(stage.GetPseudoRoot(), Usd.TraverseInstanceProxies()):
+#         if p.HasAPI(UsdPhysics.CollisionAPI) and q.IsPathIncluded(p.GetPath()):
+#             cnt += 1
+#     print(f"[cg] CollisionGroup members (resolved) = {cnt}")
+#     # except Exception as e:
+#     #     print(f"[cg] CollisionGroup not supported on this build: {e}")
+
+#     # 4) 保険：必ず効かせるために PhysX filteredPairs も設定
+#     _force_physx_filtered_pairs(stage, shape_targets)
+
+
+
+
+
+# def _find_physics_scene(stage):
+#     # 代表的な場所に無ければタイプ名でスキャン
+#     return (stage.GetPrimAtPath("/World/physicsScene") 
+#             or next((p for p in stage.Traverse() if p.GetTypeName()=="PhysicsScene"), None))
+
+# def _list_stone_shapes_in_env(stage, env_path: str, stone_prefix="Stone_"):
+#     """env 直下の Stone_* 配下にある CollisionAPI 付き shape のパスを列挙（実体のみ）"""
+#     shapes = []
+#     env = stage.GetPrimAtPath(env_path)
+#     if not env: return shapes
+#     for stone in env.GetChildren():
+#         if not stone.GetName().startswith(stone_prefix):
+#             continue
+#         # 石配下の shape を収集
+#         for p in Usd.PrimRange.AllPrims(stone):
+#             if (not p.IsInstanceProxy()) and p.HasAPI(UsdPhysics.CollisionAPI):
+#                 shapes.append(p.GetPath())
+#     return shapes
+
+# def disable_stone_to_stone_collisions_via_physx_pairs(env_paths):
+#     stage = omni.usd.get_context().get_stage()
+#     scene_prim = _find_physics_scene(stage)
+#     if not scene_prim:
+#         print("[physx] ERROR: PhysicsScene not found"); 
+#         return
+
+#     api = PhysxSchema.PhysxSceneAPI.Apply(scene_prim)
+#     rel = (api.GetPrim().GetRelationship("physx:filteredPairs") 
+#            or api.GetPrim().CreateRelationship("physx:filteredPairs"))
+
+#     # 環境ごとに“同じ環境内の石どうし”だけを無効化（ペア数を抑える）
+#     targets_flat = []
+#     total_pairs = 0
+#     for env_path in env_paths:
+#         shapes = _list_stone_shapes_in_env(stage, env_path)
+#         N = len(shapes)
+#         for i in range(N):
+#             a = Sdf.Path(shapes[i])
+#             for j in range(i+1, N):
+#                 b = Sdf.Path(shapes[j])
+#                 targets_flat.extend([a, b])
+#         total_pairs += (N*(N-1))//2
+
+#     # 既存ターゲットを置き換え（増殖防止）
+#     rel.SetTargets(targets_flat)
+#     print(f"[physx] filteredPairs set: {total_pairs} pairs across {len(env_paths)} env(s)")
+
+
+
+from itertools import combinations
+
+
+def _find_physics_scene(stage):
+    # 代表的な場所に無ければタイプで探索
+    return (stage.GetPrimAtPath("/World/physicsScene")
+            or next((p for p in stage.Traverse() if p.GetTypeName()=="PhysicsScene"), None))
+
+def _list_stone_shapes_in_env(stage, env_path: str, stone_prefix="Stone_"):
+    """env 直下の Stone_* 配下にある '実体' の衝突形状(=CollisionAPI付きprim)を列挙"""
+    shapes = []
+    env = stage.GetPrimAtPath(env_path)
+    if not env: 
+        return shapes
+    for stone in env.GetChildren():
+        if not stone.GetName().startswith(stone_prefix):
+            continue
+        for p in Usd.PrimRange.AllPrims(stone):
+            # instance proxy は除外
+            if (not p.IsInstanceProxy()) and p.HasAPI(UsdPhysics.CollisionAPI):
+                shapes.append(p.GetPath().pathString)
+    return shapes
+
+def _apply_group_mask_to_shapes(stage, shape_paths, group_id=1, allow_robot_ground_mask=0b110, prefer_uint=True):
+    """フォールバック：各 Shape に group/mask を直書き（RigidBodyではなく Shape に！）"""
+    from pxr import Sdf
+    for sp in shape_paths:
+        prim = stage.GetPrimAtPath(sp)
+        if prefer_uint:
+            prim.CreateAttribute("physxCollision:group", Sdf.ValueTypeNames.UInt).Set(group_id)
+            prim.CreateAttribute("physxCollision:mask",  Sdf.ValueTypeNames.UInt).Set(allow_robot_ground_mask)
+            # 互換名も一応
+            prim.CreateAttribute("physxCollision:filterGroup", Sdf.ValueTypeNames.UInt).Set(group_id)
+            prim.CreateAttribute("physxCollision:filterMask",  Sdf.ValueTypeNames.UInt).Set(allow_robot_ground_mask)
+        else:
+            prim.CreateAttribute("physxCollision:group", Sdf.ValueTypeNames.Int).Set(group_id)
+            prim.CreateAttribute("physxCollision:mask",  Sdf.ValueTypeNames.Int).Set(allow_robot_ground_mask)
+
+def disable_stone_to_stone_collisions_filtered(env_paths, stone_prefix="Stone_"):
+    """
+    env_paths: 例 ["/World/envs/env_0", "/World/envs/env_1", ...]
+    - まず UsdPhysics.FilteredPairsAPI で Stone↔Stone の全ペアを登録（推奨手段）
+    - API が無ければ、石の Shape に group/mask を直書きするフォールバックに切替
+    """
+    stage = omni.usd.get_context().get_stage()
+
+    # 1) 環境ごとに石の Shape を収集（同一env内の石どうしのみを遮断してペア数を節約）
+    shapes_all = []
+    pairs = []
+    for env in env_paths:
+        shapes = _list_stone_shapes_in_env(stage, env, stone_prefix=stone_prefix)
+        shapes_all.extend(shapes)
+        if len(shapes) >= 2:
+            pairs.extend((Sdf.Path(a), Sdf.Path(b)) for a, b in combinations(shapes, 2))
+
+    print(f"[filtered] envs={len(env_paths)} shapes={len(shapes_all)} pairs={len(pairs)}")
+
+    if not shapes_all:
+        print("[filtered] WARNING: no stone shapes found (CollisionAPI未付与 or パス誤り)")
+        return False
+
+    # 2) 推奨：FilteredPairsAPI があればそれを使う（重複管理をAPI側に任せられる）
+    scene_prim = _find_physics_scene(stage)
+    if scene_prim and hasattr(UsdPhysics, "FilteredPairsAPI"):
+        api = UsdPhysics.FilteredPairsAPI.Apply(scene_prim)
+        try:
+            if hasattr(api, "SetFilteredPairs"):
+                api.SetFilteredPairs(pairs)
+                print(f"[filtered] UsdPhysics.FilteredPairsAPI.SetFilteredPairs ok ({len(pairs)} pairs)")
+                return True
+            elif hasattr(api, "AddFilteredPairs"):
+                # 既存を消してから追加（関数が無いビルドもあるので try）
+                try:
+                    rel = api.CreateFilteredPairsRel()  # リレーションを直で取得
+                    # ClearTargets は removeSpec を要求する版があるため空セットで上書き
+                    rel.SetTargets([])
+                except Exception:
+                    pass
+                api.AddFilteredPairs(pairs)
+                print(f"[filtered] UsdPhysics.FilteredPairsAPI.AddFilteredPairs ok ({len(pairs)} pairs)")
+                return True
+        except Exception as e:
+            print(f"[filtered] FilteredPairsAPI failed ({type(e).__name__}): {e}")
+
+    # 3) フォールバック：石の Shape に group/mask を直書き（石同士は当たらない）
+    _apply_group_mask_to_shapes(stage, shapes_all, group_id=1, allow_robot_ground_mask=0b110, prefer_uint=True)
+    print("[filtered] Fallback: group/mask written to stone shapes (UInt). "
+          "必要なら Int/16bit に落として再適用してください。")
+    return True
+
+
+
+
+
+
+
+
+STONE_BIT = 0x0002  # 石のグループ用ビット
+
+def _is_collision_prim(stage, prim):
+    return bool(UsdPhysics.CollisionAPI.Get(stage, prim.GetPath()))
+
+def _value_type_uint_or_int():
+    # UInt があれば使う。無ければ Int にフォールバック
+    return Sdf.ValueTypeNames.UInt if hasattr(Sdf.ValueTypeNames, "UInt") else Sdf.ValueTypeNames.Int
+
+def _set_attr_raw(prim, name, vtype, value):
+    attr = prim.GetAttribute(name)
+    if not attr:
+        attr = prim.CreateAttribute(name, vtype, custom=False)
+    attr.Set(value)
+
+def _set_group_mask(stage, prim, group, mask):
+    api = PhysxSchema.PhysxCollisionAPI.Apply(prim)
+    if hasattr(api, "CreateCollisionGroupAttr") and hasattr(api, "CreateCollisionFilterMaskAttr"):
+        api.CreateCollisionGroupAttr(int(group))
+        api.CreateCollisionFilterMaskAttr(int(mask) & 0xFFFFFFFF)
+    else:
+        _set_attr_raw(prim, "physxCollision:collisionGroup", Sdf.ValueTypeNames.Int, int(group))
+        _set_attr_raw(prim, "physxCollision:collisionFilterMask", _value_type_uint_or_int(), int(mask) & 0xFFFFFFFF)
+
+def _force_collision_enabled_and_offsets(prim, enabled=True, rest=0.0, contact=0.02):
+    # Creator があればそれを、無ければ生属性で強制セット
+    coll = UsdPhysics.CollisionAPI.Apply(prim)
+    if hasattr(coll, "CreateCollisionEnabledAttr"):
+        coll.CreateCollisionEnabledAttr(bool(enabled))
+    else:
+        _set_attr_raw(prim, "physics:collisionEnabled", Sdf.ValueTypeNames.Bool, bool(enabled))
+
+    if hasattr(coll, "CreateRestOffsetAttr") and hasattr(coll, "CreateContactOffsetAttr"):
+        coll.CreateRestOffsetAttr(float(rest))
+        coll.CreateContactOffsetAttr(float(contact))
+    else:
+        _set_attr_raw(prim, "physics:restOffset", Sdf.ValueTypeNames.Float, float(rest))
+        _set_attr_raw(prim, "physics:contactOffset", Sdf.ValueTypeNames.Float, float(contact))
+
+def set_stones_no_self_collision(stage, root="/World/envs", stone_prefix="Stone_"):
+    """
+    Stone_* 配下の衝突形状に:
+      group = STONE_BIT
+      mask  = 0xFFFFFFFF & ~STONE_BIT  （石どうし無効）
+      collisionEnabled=True, rest/contact を健全値に固定
+    """
+    for prim in stage.Traverse():
+        p = prim.GetPath().pathString
+        if not p.startswith(root):
+            continue
+        # Stone_*** 本体またはその子孫だけ対象
+        names = p.split("/")
+        if not any(n.startswith(stone_prefix) for n in names):
+            continue
+        if not _is_collision_prim(stage, prim):
+            continue
+
+        _set_group_mask(stage, prim, STONE_BIT, 0xFFFFFFFF & ~STONE_BIT)
+        _force_collision_enabled_and_offsets(prim, enabled=True, rest=0.0, contact=0.02)
+
+
+
+def dump(stage, path):
+    prim = stage.GetPrimAtPath(path)
+    coll = UsdPhysics.CollisionAPI.Get(stage, prim.GetPath())
+    g = prim.GetAttribute("physxCollision:collisionGroup").Get()
+    m = prim.GetAttribute("physxCollision:collisionFilterMask").Get()
+    print(f"\n== {path} ==")
+    print("enabled:", coll and coll.GetCollisionEnabledAttr().Get())
+    print("group  :", g, " mask:", hex(m) if m is not None else None)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+STONE_BIT  = 1 << 1
+ALL_MASK32 = 0xFFFFFFFF
+STONE_MASK_ALLOW_ALL_BUT_STONE = ALL_MASK32 ^ STONE_BIT  # 石以外は全部当てる（＝石↔石のみ拒否）
+
+def _iter_collision_shapes(stage, root_path: str):
+    root = stage.GetPrimAtPath(root_path)
+    if not root or not root.IsValid():
+        return
+    # 読み取りは proxy を含めてOK
+    for p in Usd.PrimRange(root, Usd.TraverseInstanceProxies()):
+        if p.HasAPI(UsdPhysics.CollisionAPI):
+            yield p
+
+def _get_authorable_shape_prim(shape_prim: Usd.Prim) -> Usd.Prim:
+    """instance proxy なら Prototype 内の対応Primに切替。"""
+    # 一部ビルドでは IsInstanceProxy が未定義のことがあるので hasattr チェック
+    if hasattr(shape_prim, "IsInstanceProxy") and shape_prim.IsInstanceProxy():
+        return shape_prim.GetPrimInPrototype()
+    return shape_prim
+
+def _set_group_mask(shape_prim: Usd.Prim, group: int, mask: int):
+    # PhysX 衝突APIを prim に適用（これをやらないと無視されることがある）
+    PhysxSchema.PhysxCollisionAPI.Apply(shape_prim)
+    shape_prim.CreateAttribute("physxCollision:group", Sdf.ValueTypeNames.UInt).Set(int(group))
+    shape_prim.CreateAttribute("physxCollision:mask",  Sdf.ValueTypeNames.UInt).Set(int(mask))
+    # 互換キー（古いビルド向け）
+    shape_prim.CreateAttribute("physxCollision:filterGroup", Sdf.ValueTypeNames.UInt).Set(int(group))
+    shape_prim.CreateAttribute("physxCollision:filterMask",  Sdf.ValueTypeNames.UInt).Set(int(mask))
+
+def _collect_stone_root_paths(scene, stones) -> list[str]:
+    stage = omni.usd.get_context().get_stage()
+    # object_prim_paths があれば使う
+    opp = getattr(stones, "object_prim_paths", None)
+    paths = []
+    if opp:
+        for p in opp:
+            prim = stage.GetPrimAtPath(p)
+            if prim and prim.IsValid():
+                paths.append(p)
+        if paths:
+            return sorted(set(paths))
+    # cfg からワイルドカード展開
+    for _, ro_cfg in stones.cfg.rigid_objects.items():
+        expr = ro_cfg.prim_path
+        expr = expr.replace("{ENV_REGEX_NS}", "/World/envs/env_.*")
+        for p in sim_utils.find_matching_prim_paths(expr, stage):
+            prim = stage.GetPrimAtPath(p)
+            if prim and prim.IsValid():
+                paths.append(p)
+    return sorted(set(paths))
+
+def disable_stone_vs_stone(scene, stones_name: str = "stones"):
+    stage = omni.usd.get_context().get_stage()
+    stones = scene.rigid_object_collections[stones_name]
+    stone_roots = _collect_stone_root_paths(scene, stones)
+    if not stone_roots:
+        print("[stone-filter] no stone roots found (prim_path を確認)")
+        return
+
+    wrote = 0
+    seen_authorables = set()  # Prototype重複に備えて重複排除
+    with Sdf.ChangeBlock():
+        for root in stone_roots:
+            for shp in _iter_collision_shapes(stage, root):
+                tgt = _get_authorable_shape_prim(shp)
+                pth = tgt.GetPath().pathString
+                if pth in seen_authorables:
+                    continue
+                seen_authorables.add(pth)
+                _set_group_mask(tgt, STONE_BIT, STONE_MASK_ALLOW_ALL_BUT_STONE)
+                wrote += 1
+    print(f"[stone-filter] wrote group/mask on authorable stone shapes: {wrote}")
+
+
+
+
+
+
+
+
+def _iter_collider_paths(stage, root_path: str):
+    root = stage.GetPrimAtPath(root_path)
+    if not root or not root.IsValid():
+        return
+    # 形状(=CollisionAPI付き)の「パス」を列挙。インスタンス配下も含める
+    for p in Usd.PrimRange(root, Usd.TraverseInstanceProxies()):
+        if p.HasAPI(UsdPhysics.CollisionAPI):
+            yield p.GetPath()
+
+def _collect_env_stone_shape_paths(scene, env_i: int, stones_name="stones"):
+    """env_i 配下の『石の形状Primパス』をすべて列挙（インスタンス対応・取りこぼし防止）。"""
+    stage = omni.usd.get_context().get_stage()
+    stones = scene.rigid_object_collections[stones_name]
+    paths = set()
+    # cfg の prim_path を /World/envs/env_i に解決してから、配下の形状を拾う
+    for _, ro_cfg in stones.cfg.rigid_objects.items():
+        expr = ro_cfg.prim_path.replace("{ENV_REGEX_NS}", f"/World/envs/env_{env_i}")
+        for root in sim_utils.find_matching_prim_paths(expr, stage):
+            for shp in _iter_collider_paths(stage, root):
+                paths.add(shp.pathString)
+    return sorted(paths)
+
+def apply_stone_self_filter_per_env(scene, stones_name="stones", group_root="/World/collisions"):
+    """各envに CollisionGroup を作り、グループ内(=同envの石)衝突を自己フィルタで遮断。"""
+    stage = omni.usd.get_context().get_stage()
+    for i in range(scene.num_envs):
+        grp_path = f"{group_root}/stones_env_{i}"
+        grp = UsdPhysics.CollisionGroup.Define(stage, Sdf.Path(grp_path))
+        includes = grp.GetCollidersCollectionAPI().GetIncludesRel()
+        # includes を石形状の実パスで上書き
+        stone_shapes = _collect_env_stone_shape_paths(scene, i, stones_name=stones_name)
+        includes.SetTargets([Sdf.Path(p) for p in stone_shapes])
+        # 自分自身を filteredGroups に入れて「自己コリジョン無効化」
+        grp.GetFilteredGroupsRel().SetTargets([Sdf.Path(grp_path)])
+    print("[stone-filter] CollisionGroup self-filter applied for stones in each env")
+
+
+def diag_stone_pair_filter(scene, stones_name="stones", env_i=0, sample_k=5):
+    stage = omni.usd.get_context().get_stage()
+    # env_i の石形状だけを診断
+    stone_shapes = _collect_env_stone_shape_paths(scene, env_i, stones_name=stones_name)
+    # 読みはプロキシでもOKだが、念のためプロトタイプ側も併用
+    def read_gm(path):
+        p = stage.GetPrimAtPath(path)
+        # プロキシならプロトタイプへ
+        if hasattr(p, "IsInstanceProxy") and p.IsInstanceProxy():
+            p = p.GetPrimInPrototype()
+        g = p.GetAttribute("physxCollision:group").Get()
+        m = p.GetAttribute("physxCollision:mask").Get()
+        return (g or 0), (m or 0)
+    metas = [(path, *read_gm(path)) for path in stone_shapes]
+    n = len(metas)
+    bad = []
+    for a in range(n):
+        pa, ga, ma = metas[a]
+        for b in range(a+1, n):
+            pb, gb, mb = metas[b]
+            collide = (ga & mb) != 0 and (gb & ma) != 0
+            if collide:
+                bad.append((pa, pb, ga, ma, gb, mb))
+                if len(bad) >= sample_k:
+                    break
+        if len(bad) >= sample_k:
+            break
+    if bad:
+        print(f"[diag] BAD pairs in env_{env_i}: {len(bad)} (sample below)")
+        for (pa, pb, ga, ma, gb, mb) in bad[:sample_k]:
+            print("  A:", pa, " g/m=", ga, ma)
+            print("  B:", pb, " g/m=", gb, mb)
+    else:
+        print(f"[diag] All stone pairs in env_{env_i} are filtered as expected.")
+
+
+
+
+import types
+
+
+
+
+
 
 
 class ManagerBasedEnv:
@@ -132,6 +1774,8 @@ class ManagerBasedEnv:
         with Timer("[INFO]: Time taken for scene creation", "scene_creation"):
             # set the stage context for scene creation steps which use the stage
             with use_stage(self.sim.get_initial_stage()):
+
+
                 self.scene = InteractiveScene(self.cfg.scene)
                 attach_stage_to_usd_context()
         print("[INFO]: Scene manager: ", self.scene)
@@ -184,6 +1828,60 @@ class ManagerBasedEnv:
 
         # initialize observation buffers
         self.obs_buf = {}
+
+
+
+        #changed
+
+
+        # self.block_paths_by_env = None
+        # self.block_xy_local = None
+
+    
+        # tiles = self.scene.terrain.terrain_origins   # [rows, cols, 3] or [num_tiles, 3]
+        # if tiles.dim() == 3:
+        #     tiles = tiles.reshape(-1, 3)
+        # N = int(self.num_envs)
+        # self._fixed_tile_centers = tiles[:N].to(self.scene.env_origins.device,
+        #                                         self.scene.env_origins.dtype).clone()
+
+        
+        # coll = self.scene.rigid_object_collections["stones"]
+        # # もし default_object_state がワールドなら env_origins を引いてローカル化
+        # S = coll.data.default_object_state.clone()      # [N, M, 13]
+        # S[..., :3] -= self.scene.env_origins.unsqueeze(1)
+        # self._stones_default_local = S 
+
+        self._alloc_custom_buffers()
+
+
+
+
+        # self.buffers.alive  = torch.zeros(self.scene.num_envs, dtype=torch.bool, device=self.device)
+        # self.buffers.hold_t = torch.zeros(self.scene.num_envs, device=self.device)
+
+
+
+
+
+    def _alloc_custom_buffers(self):
+        B, dev = self.scene.num_envs, self.device
+        # 右前足タスクで使う状態フラグ
+        self._buf = types.SimpleNamespace()
+        self._buf.alive  = torch.zeros(B, dtype=torch.bool, device=dev)
+        self._buf.hold_t = torch.zeros(B, device=dev)
+        self._buf.is_holding = torch.zeros(B, dtype=torch.bool, device=dev)
+
+        # ★ 追加: 力履歴スタック [B, K, 4脚, 3軸]
+        self._ft_K = 6               # 履歴フレーム数（必要なら変更）
+        self._mass_kg = 15.0         # 体重比正規化に使う質量（あなたの機体に合わせて）
+        self._normalize_grf = True   # True なら N/(m*g) に正規化
+        self._buf.ft_stack = torch.zeros(B, self._ft_K, 4, 3, device=dev)
+
+
+
+
+
 
     def __del__(self):
         """Cleanup for the environment."""
@@ -300,8 +1998,132 @@ class ManagerBasedEnv:
         if seed is not None:
             self.seed(seed)
 
+
+
+
+
+        #changed, proposed
+
+        #allign number of envs and sub terrains
+        # sub_origins = self.scene.terrain.terrain_origins  # 形状が [rows, cols, 3] または [num_tiles, 3]
+
+        # # 1) [rows, cols, 3] → [rows*cols, 3] にフラット化
+        # if sub_origins.dim() == 3:
+        #     sub_origins = sub_origins.reshape(-1, 3)
+
+        # # 2) env数チェック
+        # N = int(self.num_envs)
+        # # assert sub_origins.shape[0] >= N, f"need >= {N} tiles, got {sub_origins.shape[0]}"
+
+        # # 3) デバイス/型を env_origins に合わせてコピー（in-place）
+        # sub_origins = sub_origins.to(device=self.scene.env_origins.device,
+        #                             dtype=self.scene.env_origins.dtype)
+        # self.scene.env_origins[:N].copy_(sub_origins[:N]) 
+
+
+        
+
+
+        # self._hard_place_everything(env_ids)
+
+
+
+
+
         # reset state of scene
         self._reset_idx(env_ids)
+
+
+        # disable_stone_vs_stone(self.scene, stones_name="stones")
+
+        # apply_stone_self_filter_per_env(self.scene)
+
+        # # self.debug_read_some()
+
+
+        # diag_stone_pair_filter(self.scene, stones_name="stones", env_i=0)
+
+
+        #changed
+
+       
+
+
+        
+
+
+
+        
+
+
+
+
+
+
+       
+
+        # # for proposed terrain
+        # self.stones = self.scene.rigid_object_collections["stones"]
+
+        # STONE_W, STONE_H, GAP= 0.2, 0.3, 0.004
+        # stone_xy_list = self.make_ring_xy4(STONE_W, GAP, inner_half=0.7, outer_half=3.37)
+        # self.xy_local = torch.tensor(stone_xy_list, dtype=torch.float32, device=self.scene.device)
+
+        # # ③ 全Env一括で初期配置
+        # self._place_all_stones()
+
+    
+
+        # robot = self.scene.articulations["robot"]
+        # print("========================================")
+        # print("!!! ROBOT JOINT ORDER CHECK !!!")
+        # for i, name in enumerate(robot.joint_names):
+        #     print(f"Index {i:02d}: {name}")
+        # print("========================================")
+
+        
+
+        
+
+       
+
+
+
+
+
+
+
+
+        # env の個数を数える（/World/envs/env_XXX を列挙）
+        
+        # num_envs = self.scene.num_envs
+        # env_origins_np = self.scene.env_origins
+
+
+
+        # for ei in range(num_envs):
+        #     # ★ この env 専用のオフセット (Gf.Vec3f) を準備
+        #     env_origin_vec_np = env_origins_np[ei]
+        #     env_origin_gf = Gf.Vec3f(float(env_origin_vec_np[0]),
+        #                             float(env_origin_vec_np[1]),
+        #                             float(env_origin_vec_np[2]))
+            
+        #     # 4. ★ wire_env_stones に、計算したオフセットを渡す
+        #     wire_env_stones(
+        #         env_index=ei,
+        #         env_origin_offset=env_origin_gf, # ★ 新しい引数を追加
+        #         env_ns_template="/World/envs/env_{env}",
+        #         stone_name_prefix="Stone_",
+        #         joints_root_rel="fragile/Joints"
+        #     )
+
+
+        #
+
+
+
+
+
 
         # update articulation kinematics
         self.scene.write_data_to_sim()
@@ -320,8 +2142,110 @@ class ManagerBasedEnv:
             while SimulationManager.assets_loading():
                 self.sim.render()
 
+        
+       
+
+
         # return observations
         return self.obs_buf, self.extras
+
+    
+    def debug_read_some(self, stones_name="stones", limit=5):
+        stage = omni.usd.get_context().get_stage()
+        stones = self.scene.rigid_object_collections[stones_name]
+        roots = _collect_stone_root_paths(self.scene, stones)
+        n=0
+        for r in roots:
+            for shp in _iter_collision_shapes(stage, r):
+                tgt = _get_authorable_shape_prim(shp)
+                g = tgt.GetAttribute("physxCollision:group").Get()
+                m = tgt.GetAttribute("physxCollision:mask").Get()
+                print("[dbg]", tgt.GetPath(), "group=", g, "mask=", m)
+                n += 1
+                if n >= limit: return
+
+    
+
+    
+
+    def _hard_place_everything(self, env_ids: torch.Tensor):
+        scene = self.scene
+        # 1) ロボット（Articulation）
+        robot = scene["robot"]  # prim_path は "{ENV_REGEX_NS}/Robot" で複製されていること
+        root = robot.data.default_root_state.clone()
+        root[env_ids, :3] += scene.env_origins[env_ids]            # ← env 原点を足す
+        robot.write_root_pose_to_sim(root[env_ids, :7])
+        robot.write_root_velocity_to_sim(root[env_ids, 7:])
+
+        # 2) 石（RigidObjectCollection）
+        stones = scene["stones"]  # 例: RigidObjectCollection 名
+        obj = stones.data.default_object_state.clone()              # shape: (N_env, N_obj, 13) 相当
+        obj[env_ids, :, :3] += scene.env_origins[env_ids].unsqueeze(1)
+        stones.write_object_link_pose_to_sim(obj[env_ids, :, :7])
+        stones.write_object_com_velocity_to_sim(obj[env_ids, :, 7:])
+
+        # 3) 反映
+        # scene.write_data_to_sim()
+
+
+    
+
+
+
+
+    
+
+    def make_ring_xy4(self, stone_w, gap, inner_half, outer_half):
+        """
+        グリッドを使いつつ、「はみ出し」を防ぐため、
+        フィルタリング時にブロックの幅を考慮する。
+        """
+        pitch = stone_w + gap
+        half_w = stone_w / 2.0  # ★ ブロックの半分の幅
+
+        # 1. 原点(0,0)に対称なグリッドを生成 (No. 52のロジック)
+        #    (これが「均等」の基礎となります)
+        coords_pos = np.arange(0, outer_half, pitch)
+        coords_neg = np.arange(-pitch, -outer_half, -pitch)
+        xs = np.concatenate((coords_neg, coords_pos))
+        ys = np.concatenate((coords_neg, coords_pos))
+
+        if xs.size == 0 or ys.size == 0:
+            return []  # 格子点が無ければ空リストを返す
+
+        xs_grid, ys_grid = np.meshgrid(xs, ys, indexing="xy")
+
+        # 2. フィルタリング (★ここが修正点)
+        
+        # グリッドの各点(石の中心)のL∞ノルム(チェビシェフ距離)
+        max_dist_center = np.maximum(np.abs(xs_grid), np.abs(ys_grid))
+
+        # 3. 内側の境界チェック
+        #    石の「中心」が「(内側の境界 + ブロックの半幅)」より外側にあるか
+        m_inner = (max_dist_center > inner_half + half_w)
+
+        # 4. 外側の境界チェック
+        #    石の「中心」が「(外側の境界 - ブロックの半幅)」より内側にあるか
+        m_outer = (max_dist_center < outer_half - half_w)
+
+        m_positive_x = (xs_grid - half_w > 0)
+
+        # ブロックの上端が y_limit より下
+        m_y_upper = (ys_grid + half_w < 1.55)
+        # ブロックの下端が -y_limit より上
+        m_y_lower = (ys_grid - half_w > -1.55)
+
+        # 5. 両方を満たすもの
+        #    (これにより、ブロック全体がリングの内側に収まる)
+        m = m_inner & m_outer & m_positive_x & m_y_upper & m_y_lower
+        
+        xs_flat, ys_flat = xs_grid[m], ys_grid[m]
+        
+        return [(float(x), float(y)) for x, y in zip(xs_flat, ys_flat)]
+
+
+    
+
 
     def reset_to(
         self,
@@ -358,10 +2282,46 @@ class ManagerBasedEnv:
         if seed is not None:
             self.seed(seed)
 
+
+
+
+
+
+
+        
+        #changed, proposed
+
+        #allign number of envs and sub terrains
+        # sub_origins = self.scene.terrain.terrain_origins  # 形状が [rows, cols, 3] または [num_tiles, 3]
+
+        # # 1) [rows, cols, 3] → [rows*cols, 3] にフラット化
+        # if sub_origins.dim() == 3:
+        #     sub_origins = sub_origins.reshape(-1, 3)
+
+        # # 2) env数チェック
+        # N = int(self.num_envs)
+        # # assert sub_origins.shape[0] >= N, f"need >= {N} tiles, got {sub_origins.shape[0]}"
+
+        # # 3) デバイス/型を env_origins に合わせてコピー（in-place）
+        # sub_origins = sub_origins.to(device=self.scene.env_origins.device,
+        #                             dtype=self.scene.env_origins.dtype)
+        # self.scene.env_origins[:N].copy_(sub_origins[:N]) 
+
+
+        # self._hard_place_everything(env_ids)
+
+
+
+
+
+
+
         self._reset_idx(env_ids)
 
         # set the state
         self.scene.reset_to(state, env_ids, is_relative=is_relative)
+
+
 
         # update articulation kinematics
         self.sim.forward()
@@ -379,6 +2339,69 @@ class ManagerBasedEnv:
         # return observations
         return self.obs_buf, self.extras
 
+
+
+
+
+
+    # def _update_hold_flags(self, T_hold=0.5, fz_contact=15.0, theta_lim=0.20, w_lim=1.0):
+    #     inside = (fr_on_block_rect(self, margin=0.02) > 0.5)   # あなたの関数
+    #     fz_ok  = (fr_fz(self) > fz_contact)
+    #     theta  = _block_theta(self)
+    #     wmag   = _block_wmag(self)
+    #     stable = (theta <= theta_lim) & (wmag <= w_lim)
+
+    #     alive = inside & fz_ok & stable
+    #     self._buf.alive = alive
+    #     self._buf.hold_t = torch.where(alive, self._buf.hold_t + self.dt,
+    #                                    torch.zeros_like(self._buf.hold_t))
+
+    # def _update_hold_flags(self, T_hold=0.2, fz_contact=5.0, theta_lim=0.20, w_lim=1.0):
+    #     # 1. 各条件の判定
+    #     inside = (fr_on_block_rect(self, margin=0.02) > 0.5)
+    #     fz_ok  = (fr_fz(self) > fz_contact)
+        
+    #     # ブロックの安定性 (ここはそのままでOK)
+    #     theta  = _block_theta(self)
+    #     wmag   = _block_wmag(self)
+    #     stable = (theta <= theta_lim) & (wmag <= w_lim)
+
+    #     # 2. フラグの結合
+    #     # 変数名を is_holding に変更 (alive と混同しないため)
+    #     is_holding = inside & fz_ok & stable
+        
+    #     # バッファへの保存 (報酬計算などで使うため)
+    #     self._buf.is_holding = is_holding 
+
+    #     # 3. タイマーの更新 (チャタリング対策版)
+    #     # holdingなら時間を足す。
+    #     # holdingじゃないなら、「即0」ではなく「少し減らす」や「即0」などポリシーによるが、
+    #     # ここでは厳密にやるなら「即0」で良いが、fzの閾値を少し緩める等の対策を推奨。
+        
+    #     # 例: 制御周期を使う
+    #     dt = self.step_dt  
+        
+    #     self._buf.hold_t = torch.where(
+    #         is_holding, 
+    #         self._buf.hold_t + dt,          # 条件を満たせば加算
+    #         torch.zeros_like(self._buf.hold_t) # 満たさなければリセット
+    #     )
+
+    def _update_ft_stack(self):
+        # センサから今フレームの力を取得
+        ft = self.scene.sensors["contact_forces"].data.net_forces_w  # [B,4,3]
+        if self._normalize_grf:
+            ft = ft / (self._mass_kg * 9.81)
+
+        self._buf.ft_stack = torch.roll(self._buf.ft_stack, shifts=-1, dims=1)
+        self._buf.ft_stack[:, -1] = ft
+
+
+
+
+
+
+
     def step(self, action: torch.Tensor) -> tuple[VecEnvObs, dict]:
         """Execute one time-step of the environment's dynamics.
 
@@ -394,6 +2417,21 @@ class ManagerBasedEnv:
         Returns:
             A tuple containing the observations and extras.
         """
+
+
+
+        
+        self._update_ft_stack()
+        # self._update_hold_flags()
+
+
+
+
+
+
+
+
+
         # process actions
         self.action_manager.process_action(action.to(self.device))
 
@@ -497,6 +2535,14 @@ class ManagerBasedEnv:
             env_step_count = self._sim_step_counter // self.cfg.decimation
             self.event_manager.apply(mode="reset", env_ids=env_ids, global_env_step_count=env_step_count)
 
+
+
+
+
+            self._buf.alive[env_ids]  = False
+            self._buf.hold_t[env_ids] = 0.0
+
+
         # iterate over all managers and reset them
         # this returns a dictionary of information which is stored in the extras
         # note: This is order-sensitive! Certain things need be reset before others.
@@ -513,3 +2559,19 @@ class ManagerBasedEnv:
         # -- recorder manager
         info = self.recorder_manager.reset(env_ids)
         self.extras["log"].update(info)
+
+
+
+
+
+
+
+
+
+
+
+
+    
+
+    
+

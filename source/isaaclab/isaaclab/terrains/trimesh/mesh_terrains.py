@@ -858,3 +858,190 @@ def repeated_objects_terrain(
     meshes_list.append(platform)
 
     return meshes_list, origin
+
+
+
+
+
+
+
+
+# ---- 補助: 4辺のフレーム（外周リング）を4つのBoxで作る -------------------
+def make_rect_frame(outer_xy, hole_xy, z_top, thickness):
+    """
+    outer_xy: (Lx, Ly) フレーム外形
+    hole_xy : (hx, hy) 穴（内側）の大きさ
+    z_top   : フレーム天面のZ
+    thickness: Z方向の厚み
+    """
+    Lx, Ly = outer_xy
+    hx, hy = hole_xy
+    z_center = z_top - thickness / 2.0
+    T = trimesh.transformations.translation_matrix
+
+    # 残すフレーム幅
+    wx = (Lx - hx) / 2.0
+    wy = (Ly - hy) / 2.0
+    assert wx > 0 and wy > 0, "Frame is not valid: hole must be smaller than outer."
+
+    parts = []
+    cx, cy = Lx / 2.0, Ly / 2.0
+
+    # 上辺
+    box_u = trimesh.creation.box(
+        (hx, wy, thickness),
+        T([cx, cy + hy / 2.0 + wy / 2.0, z_center])
+    )
+    # 下辺
+    box_d = trimesh.creation.box(
+        (hx, wy, thickness),
+        T([cx, cy - hy / 2.0 - wy / 2.0, z_center])
+    )
+    # 左辺
+    box_l = trimesh.creation.box(
+        (wx, Ly, thickness),
+        T([cx - hx / 2.0 - wx / 2.0, cy, z_center])
+    )
+    # 右辺
+    box_r = trimesh.creation.box(
+        (wx, Ly, thickness),
+        T([cx + hx / 2.0 + wx / 2.0, cy, z_center])
+    )
+    parts.extend([box_u, box_d, box_l, box_r])
+    return parts
+
+
+
+# ---- 本体: メッシュ生成 ----------------------------------------------------
+def moat_terrain(difficulty: float, cfg: MeshMoatTerrainCfg):
+    """
+    返り値: (List[trimesh.Trimesh], origin: np.ndarray)
+      meshes_list: 三角形メッシュのリスト
+      origin: 地形の原点（ロボット Spawn等の基準）→ [size_x/2, size_y/2, 0]
+    """
+    # パラメータ整理（difficultyはここでは未使用。必要なら moat_width等に掛ける）
+    Lx, Ly   = cfg.size
+    plat_w   = cfg.platform_width
+    moat_w   = cfg.moat_width
+    depth    = cfg.moat_depth
+
+    # 安全帯（中央台）と堀の内外寸
+    inner_hole = (plat_w + 2.0 * moat_w, plat_w + 2.0 * moat_w)  # 穴（=堀範囲の外側境界）
+    assert inner_hole[0] < Lx and inner_hole[1] < Ly, "moat is too wide for terrain size"
+
+    meshes_list = []
+
+    # 1) 堀底の床（z = -depth）
+    floor_center_z = -depth - cfg.floor_thickness / 2.0
+    floor = trimesh.creation.box(
+        (Lx, Ly, cfg.floor_thickness),
+        trimesh.transformations.translation_matrix([Lx / 2.0, Ly / 2.0, floor_center_z])
+    )
+    meshes_list.append(floor)
+
+    # 2) 中央プラットフォーム（天面 z = 0）
+    plat_center_z = 0.0 - cfg.platform_thickness / 2.0
+    platform = trimesh.creation.box(
+        (plat_w, plat_w, cfg.platform_thickness),
+        trimesh.transformations.translation_matrix([Lx / 2.0, Ly / 2.0, plat_center_z])
+    )
+    meshes_list.append(platform)
+
+    # 3) 外周リング（天面 z = 0、中央台の周囲を囲う）
+    ring_parts = make_rect_frame(
+        outer_xy=(Lx, Ly),
+        hole_xy=inner_hole,          # 穴 = （中央台 + 堀幅×2）
+        z_top=0.0,
+        thickness=cfg.ring_thickness
+    )
+    meshes_list += ring_parts
+
+    # 4) 原点（地形の幾何中心をXY原点にし、Z=0が“歩行面”）
+    origin = np.array([Lx / 2.0, Ly / 2.0, 0.0], dtype=float)
+
+    return meshes_list, origin
+
+
+
+
+# def sinking_tiles_terrain(
+#     difficulty: float, cfg: mesh_terrains_cfg.MeshSinkingTilesTerrainCfg
+# ) -> tuple[list[trimesh.Trimesh], np.ndarray]:
+#     """
+#     中央に安全なプラットフォームを、その周囲にタイルを配置した
+#     Mesh_terrainの「形状」を生成する。
+
+#     注意: この関数が返すメッシュは「静的」です。
+#     タイルを「沈ませる」動的な挙動は、別途シミュレーション環境側で
+#     RigidBodyやJoint、あるいはDeformableBodyとして設定する必要があります。
+#     """
+
+#     meshes_list = list()
+    
+#     # difficulty に応じてパラメータを決定 (例: タイルサイズ)
+#     tile_size = cfg.tile_size_range[0] + difficulty * (cfg.tile_size_range[1] - cfg.tile_size_range[0])
+    
+#     # 地形はZ=0を基準に、下に厚みを持つように設定
+#     terrain_z_center = -cfg.terrain_height / 2.0
+#     terrain_center_xy = (0.5 * cfg.size[0], 0.5 * cfg.size[1])
+#     terrain_center = (terrain_center_xy[0], terrain_center_xy[1], terrain_z_center)
+
+#     # 1. 中央のプラットフォームを生成
+#     platform_dim = (cfg.platform_width, cfg.platform_width, cfg.terrain_height)
+#     platform_center_transform = trimesh.transformations.translation_matrix(terrain_center)
+#     platform = trimesh.creation.box(platform_dim, platform_center_transform)
+#     meshes_list.append(platform)
+
+#     # 2. 周囲のタイルを生成
+#     tile_step = tile_size + cfg.tile_gap # タイルの中心間の距離
+    
+#     # グリッドの数を計算 (地形サイズ全体をカバー)
+#     n_tiles_x = int(np.ceil(cfg.size[0] / tile_step))
+#     n_tiles_y = int(np.ceil(cfg.size[1] / tile_step))
+
+#     # グリッドの開始位置 (左下隅のタイルの中心)
+#     start_x = terrain_center_xy[0] - (n_tiles_x - 1) * tile_step / 2.0
+#     start_y = terrain_center_xy[1] - (n_tiles_y - 1) * tile_step / 2.0
+    
+#     tile_dim = (tile_size, tile_size, cfg.terrain_height)
+
+#     # プラットフォームの占める範囲 (AABB)
+#     platform_min_x = terrain_center_xy[0] - cfg.platform_width / 2.0
+#     platform_max_x = terrain_center_xy[0] + cfg.platform_width / 2.0
+#     platform_min_y = terrain_center_xy[1] - cfg.platform_width / 2.0
+#     platform_max_y = terrain_center_xy[1] + cfg.platform_width / 2.0
+
+#     for i in range(n_tiles_x):
+#         tile_x = start_x + i * tile_step
+#         for j in range(n_tiles_y):
+#             tile_y = start_y + j * tile_step
+
+#             # このタイルがプラットフォーム領域と重複していないかチェック
+#             # (タイルのAABBとプラットフォームのAABBが重複しているか)
+#             tile_min_x = tile_x - tile_size / 2.0
+#             tile_max_x = tile_x + tile_size / 2.0
+#             tile_min_y = tile_y - tile_size / 2.0
+#             tile_max_y = tile_y + tile_size / 2.0
+
+#             is_overlapping_platform = (
+#                 (platform_min_x < tile_max_x) and
+#                 (platform_max_x > tile_min_x) and
+#                 (platform_min_y < tile_max_y) and
+#                 (platform_max_y > tile_min_y)
+#             )
+
+#             if not is_overlapping_platform:
+#                 # タイルを生成
+#                 tile_center = (tile_x, tile_y, terrain_z_center)
+#                 tile_transform = trimesh.transformations.translation_matrix(tile_center)
+#                 tile = trimesh.creation.box(tile_dim, tile_transform)
+                
+#                 # (重要) タイルを動的に扱うため、名前 (metadata) を付与
+#                 tile.metadata['name'] = f"tile_{i}_{j}" 
+#                 meshes_list.append(tile)
+
+#     # specify the origin of the terrain (Z=0 を基準とする)
+#     origin = np.array([terrain_center_xy[0], terrain_center_xy[1], 0.0]) 
+
+#     return meshes_list, origin
+

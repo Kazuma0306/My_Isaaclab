@@ -133,13 +133,21 @@ class RslRlVecEnvWrapper(VecEnv):
     Properties
     """
 
-    def get_observations(self) -> tuple[torch.Tensor, dict]:
+    def get_observations(self) -> tuple[torch.Tensor, dict]: #changed
         """Returns the current observations of the environment."""
         if hasattr(self.unwrapped, "observation_manager"):
             obs_dict = self.unwrapped.observation_manager.compute()
         else:
             obs_dict = self.unwrapped._get_observations()
-        return obs_dict["policy"], {"observations": obs_dict}
+
+        if isinstance(obs_dict, dict):
+            # 2. 入れ子の中身を取り出して、平坦な辞書を作成します
+            final_obs_dict = {}
+            for group_name, inner_dict in obs_dict.items():
+                final_obs_dict.update(inner_dict)
+            return final_obs_dict
+        else:
+            return obs_dict
 
     @property
     def episode_length_buf(self) -> torch.Tensor:

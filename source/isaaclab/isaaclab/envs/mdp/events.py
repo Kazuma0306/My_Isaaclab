@@ -1189,6 +1189,31 @@ def reset_scene_to_default(env: ManagerBasedEnv, env_ids: torch.Tensor, reset_jo
         deformable_object.write_nodal_state_to_sim(nodal_state, env_ids=env_ids)
 
 
+
+
+
+
+#changed, for utilizing rigid object collection
+def reset_collection_to_default(env: ManagerBasedEnv, env_ids: torch.Tensor):
+    scene = env.scene
+    stones = scene.rigid_object_collections["stones"]  # 例: "stones"
+    # 1) デフォルト状態を取り出し（envローカル）
+    S = stones.data.default_object_state[env_ids].clone()     # shape: [k, M, 13] 相当
+    # 2) env原点を足してワールドへ
+    S[..., 0:3] += scene.env_origins[env_ids].unsqueeze(1)    # [k,1,3] でブロードキャスト
+    # 3) 物理へ反映（ブランチによってメソッド名が違うことがあります）
+    if hasattr(stones, "write_object_link_pose_to_sim"):
+        stones.write_object_link_pose_to_sim(S[..., :7], env_ids=env_ids)
+        stones.write_object_com_velocity_to_sim(S[..., 7:], env_ids=env_ids)
+    else:
+        # 互換：個々のオブジェクトへ書き戻す
+        for j, obj in enumerate(stones.objects):  # or stones.object_names
+            obj.write_root_pose_to_sim(S[:, j, :7], env_ids=env_ids)
+            obj.write_root_velocity_to_sim(S[:, j, 7:], env_ids=env_ids)
+
+
+
+
 class randomize_visual_texture_material(ManagerTermBase):
     """Randomize the visual texture of bodies on an asset using Replicator API.
 

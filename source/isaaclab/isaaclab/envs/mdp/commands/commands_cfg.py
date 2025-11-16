@@ -11,7 +11,7 @@ from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
 from isaaclab.utils import configclass
 
-from .null_command import NullCommand
+from .null_command import NullCommand, StepFRToBlockCommand
 from .pose_2d_command import TerrainBasedPose2dCommand, UniformPose2dCommand
 from .pose_command import UniformPoseCommand
 from .velocity_command import NormalVelocityCommand, UniformVelocityCommand
@@ -246,3 +246,33 @@ class TerrainBasedPose2dCommandCfg(UniformPose2dCommandCfg):
 
     ranges: Ranges = MISSING
     """Distribution ranges for the sampled commands."""
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# --- 設定クラス: CommandTermCfg を継承 ---
+@configclass
+class StepFRToBlockCommandCfg(CommandTermCfg):
+    """FR用 単一ブロックターゲット (ux, uy) を出すコマンド設定"""
+    class_type: type = StepFRToBlockCommand
+    # リサンプリング周期 [s]
+    resampling_time_range: tuple[float, float] = (2.0, 3.0)
+    debug_vis: bool = False
+    # ブロック中心からのローカル・オフセット範囲（m）
+    local_offset_range: tuple[float, float] = (-0.05, 0.05)
+
+    goal_pose_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
+    goal_pose_visualizer_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
+
+

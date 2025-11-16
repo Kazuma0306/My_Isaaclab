@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from .terrain_importer_cfg import TerrainImporterCfg
 
 
+
 class TerrainImporter:
     r"""A class to handle terrain meshes and import them into the simulator.
 
@@ -87,6 +88,9 @@ class TerrainImporter:
                 cfg=self.cfg.terrain_generator, device=self.device
             )
             self.import_mesh("terrain", terrain_generator.terrain_mesh)
+
+            
+
             # configure the terrain origins based on the terrain generator
             self.configure_env_origins(terrain_generator.terrain_origins)
             # refer to the flat patches

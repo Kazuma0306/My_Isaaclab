@@ -460,6 +460,11 @@ class InteractiveScene:
         for sensor in self._sensors.values():
             sensor.reset(env_ids)
 
+        
+
+
+        
+
     def write_data_to_sim(self):
         """Writes the data of the scene entities to the simulation."""
         # -- assets
@@ -783,3 +788,5 @@ class InteractiveScene:
             if hasattr(asset_cfg, "collision_group") and asset_cfg.collision_group == -1:
                 asset_paths = sim_utils.find_matching_prim_paths(asset_cfg.prim_path)
                 self._global_prim_paths += asset_paths
+
+
