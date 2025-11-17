@@ -12,9 +12,10 @@ from .commands_cfg import (
     UniformPose2dCommandCfg,
     UniformPoseCommandCfg,
     UniformVelocityCommandCfg,
-    StepFRToBlockCommandCfg
+    StepFRToBlockCommandCfg,
+    MultiLegBaseCommandCfg
 )
-from .null_command import NullCommand
+from .null_command import NullCommand, MultiLegBaseCommand
 from .pose_2d_command import TerrainBasedPose2dCommand, UniformPose2dCommand
 from .pose_command import UniformPoseCommand
 from .velocity_command import NormalVelocityCommand, UniformVelocityCommand
