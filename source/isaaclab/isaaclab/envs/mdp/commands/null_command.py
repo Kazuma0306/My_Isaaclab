@@ -827,6 +827,12 @@ class MultiLegBaseCommand3(CommandTerm):
     
 
     def _update_command(self):
+
+        if (not hasattr(self, "phase")) or (not isinstance(self.phase, torch.Tensor)) \
+           or (self.phase.shape[0] != self.num_envs):
+            self.phase = torch.zeros(self.num_envs, dtype=torch.long, device=dev)
+
+
         B, dev = self.num_envs, self.device
         scene = self.env.scene
 
@@ -836,46 +842,35 @@ class MultiLegBaseCommand3(CommandTerm):
         base_q = robot.data.root_quat_w
         R_wb3  = _rot3_from_quat_wxyz(base_q).transpose(-1, -2)  # world→base
 
-        # 出力バッファ
         out = torch.zeros(B, 3*len(LEG_ORDER), device=dev, dtype=base_p.dtype)
 
-        # フェーズごとのマスクをあらかじめ作っておく
-        phase_masks: dict[int, torch.Tensor] = {}
-        for ph in self.phases:
-            phase_masks[ph] = (self.phase == ph)  # [B] bool
-
         for i, leg in enumerate(LEG_ORDER):
-            # --- 1) 各フェーズのブロック姿勢を取得 ---
-            # pos_ph[ph]: [B,3], quat_ph[ph]: [B,4]
-            pos_ph: dict[int, torch.Tensor] = {}
-            quat_ph: dict[int, torch.Tensor] = {}
-            for ph in self.phases:
-                block = self.blocks_by_phase[ph][leg]
-                p_w, q_w = _rigid_pos_quat_w(block)
-                pos_ph[ph]  = p_w
-                quat_ph[ph] = q_w
+            # envごとの world pos/quat バッファ
+            leg_pos_w  = torch.zeros_like(base_p)   # [B,3]
+            leg_quat_w = torch.zeros_like(base_q)   # [B,4]
 
-            # --- 2) envごとに phase に応じて block pos/quat を切り替え ---
-            leg_pos_w = torch.zeros_like(base_p)
-            leg_quat_w = torch.zeros_like(base_q)
+            # --- 1) 各フェーズについて、そのフェーズに属する env だけ埋める ---
             for ph in self.phases:
-                m = phase_masks[ph]
-                if not m.any():
+                block = self.blocks_by_phase[ph][leg]      # このフェーズでこの脚が見るブロック
+                pos_w, quat_w = _rigid_pos_quat_w(block)   # [B,3], [B,4]
+
+                # phase == ph の env のインデックスを取得
+                idxs = torch.nonzero(self.phase == ph, as_tuple=False).squeeze(-1)  # [N_ph]
+                if idxs.numel() == 0:
                     continue
-                leg_pos_w[m]  = pos_ph[ph][m]
-                leg_quat_w[m] = quat_ph[ph][m]
 
-            # --- 3) ローカル [ux,uy] を block→world へ ---
+                leg_pos_w[idxs]  = pos_w[idxs]
+                leg_quat_w[idxs] = quat_w[idxs]
+
+            # --- 2) ローカル [ux,uy] を block→world→base に変換 ---
             yaw_blk = _yaw_from_quat_wxyz(leg_quat_w)   # [B]
             R_bw2   = _rot2d(yaw_blk)                   # [B,2,2]
 
             local_xy = self._local_xy[leg]              # [B,2]
             t_xy_w = (R_bw2 @ local_xy.unsqueeze(-1)).squeeze(-1) + leg_pos_w[..., :2]
             t_z_w  = leg_pos_w[..., 2] + self.block_top_offset
-
             t_w = torch.cat([t_xy_w, t_z_w.unsqueeze(-1)], dim=-1)  # [B,3]
 
-            # --- 4) world → base へ ---
             leg_b = (R_wb3 @ (t_w - base_p).unsqueeze(-1)).squeeze(-1)  # [B,3]
 
             out[:, 3*i:3*(i+1)] = leg_b
