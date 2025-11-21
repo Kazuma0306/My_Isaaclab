@@ -11,7 +11,7 @@ from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
 from isaaclab.utils import configclass
 
-from .null_command import NullCommand, StepFRToBlockCommand, MultiLegBaseCommand
+from .null_command import NullCommand, StepFRToBlockCommand, MultiLegBaseCommand, MultiLegBaseCommand2, MultiLegBaseCommand3
 from .pose_2d_command import TerrainBasedPose2dCommand, UniformPose2dCommand
 from .pose_command import UniformPoseCommand
 from .velocity_command import NormalVelocityCommand, UniformVelocityCommand
@@ -304,9 +304,9 @@ class MultiLegBaseCommandCfg(CommandTermCfg):
     # --- 他脚の固定ターゲット（ベース座標系, 単位[m]）---
     #   例は GO2 くらいの寸法を想定。実機/モデルに合わせて調整してください。
     fixed_targets_b: dict[str, tuple[float, float, float]] = {
-        "FL_foot": ( 0.25,  0.18, 0.01),
-        "RL_foot": (-0.25,  0.18, 0.01),
-        "RR_foot": (-0.25, -0.18, 0.01),
+        "FL_foot": ( 0.25,  0.18, 0.0),
+        "RL_foot": (-0.25,  0.18, 0.0),
+        "RR_foot": (-0.25, -0.18, 0.0),
     }
 
     # ロボットの脚ボディ名（順序は環境に合わせて）
@@ -324,3 +324,73 @@ class MultiLegBaseCommandCfg(CommandTermCfg):
         prim_path="/Visuals/Command/goal_pose"
     )
     feet_pose_visualizer_cfg.markers["frame"].scale = (0.07, 0.07, 0.07)
+
+
+
+# --- 設定クラス: CommandTermCfg を継承 ---
+@configclass
+class MultiLegBaseCommand2Cfg(CommandTermCfg):
+
+    """各脚のベース座標系ターゲットを出すコマンド。
+       - FR: ブロックのローカル (ux,uy) をサンプル→World→Base に変換
+       - FL/RL/RR: ベース座標の固定ターゲット
+    """
+    # 紐づけるコマンドクラス（実装側で MultiLegBaseTargetsCommand を用意）
+    class_type: type = MultiLegBaseCommand2
+
+    # リサンプリング周期 [s]
+    resampling_time_range: tuple[float, float] = (2.0, 3.0)
+    debug_vis: bool = True
+
+    
+    # --- 可視化（Wxyz で渡す）---
+    # FR の目標姿勢を表示
+    goal_pose_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
+        prim_path="/Visuals/Command/goal_pose"
+    )
+    goal_pose_visualizer_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
+
+    # 各脚ターゲットの表示（小さめ）
+    feet_pose_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
+        prim_path="/Visuals/Command/goal_pose"
+    )
+    feet_pose_visualizer_cfg.markers["frame"].scale = (0.07, 0.07, 0.07)
+
+
+
+# --- 設定クラス: CommandTermCfg を継承 ---
+@configclass
+class MultiLegBaseCommand3Cfg(CommandTermCfg):
+
+    """各脚のベース座標系ターゲットを出すコマンド。
+       - FR: ブロックのローカル (ux,uy) をサンプル→World→Base に変換
+       - FL/RL/RR: ベース座標の固定ターゲット
+    """
+    # 紐づけるコマンドクラス（実装側で MultiLegBaseTargetsCommand を用意）
+    class_type: type = MultiLegBaseCommand3
+
+    # リサンプリング周期 [s]
+    resampling_time_range: tuple[float, float] = (2.0, 3.0)
+    debug_vis: bool = True
+
+    
+    # --- 可視化（Wxyz で渡す）---
+    # FR の目標姿勢を表示
+    goal_pose_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
+        prim_path="/Visuals/Command/goal_pose"
+    )
+    goal_pose_visualizer_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
+
+    # 各脚ターゲットの表示（小さめ）
+    feet_pose_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
+        prim_path="/Visuals/Command/goal_pose"
+    )
+    feet_pose_visualizer_cfg.markers["frame"].scale = (0.07, 0.07, 0.07)
+
+
+    params=dict(
+    phase_block_keys={
+        "0": dict(FL_foot="stone3", FR_foot="stone6", RL_foot="stone4", RR_foot="stone5"),
+        "1": dict(FL_foot="stone3", FR_foot="stone2", RL_foot="stone4", RR_foot="stone6"),
+    },
+)

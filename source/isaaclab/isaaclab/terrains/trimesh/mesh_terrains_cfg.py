@@ -312,6 +312,25 @@ class MeshMoatTerrainCfg(SubTerrainBaseCfg):
 
 
 
+@configclass
+class MeshBlockTerrainCfg(SubTerrainBaseCfg):
+
+    function = mesh_terrains.block_terrain
+
+    platform_width = 1.95        # 1.5 m × 1.5 m
+    # 堀の“幅”（中央台の外周から外側地面までの距離）
+    moat_width = 2.7                  # 例: 1.0 m（お好みで調整）
+    # 落差（m）
+    moat_depth = 0.3                 # 指定どおり 0.30 m
+    # メッシュの厚み（実体化用のZ厚さ）
+    # platform_thickness = 0.30         
+    ring_thickness     = 0.20         # 外周リングの厚み
+    floor_thickness    = 0.10         # 堀底のスラブ厚
+    # 便利オプション
+    center = None                     # Noneなら自動（sizeの中央が原点）
+
+
+
 
 # @configclass
 # class MeshSinkingTilesTerrainCfg(SubTerrainBaseCfg):

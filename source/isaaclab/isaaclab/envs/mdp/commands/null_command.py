@@ -272,9 +272,9 @@ class MultiLegBaseCommand(CommandTerm):
         # 他脚：ワールド矩形定義（env原点ローカルで与え、originを足してワールドへ）
         # 例: {"FL_foot": {"center_xy":(0.30, 0.20), "half":(0.06,0.06), "top_z":0.01}, ...}
         self.ped_areas: Dict[str, Dict] = getattr(cfg, "ped_areas", {
-            "FL_foot": {"center_xy": (0.30,  0.20), "half": (0.06,0.06), "top_z": 0.01},
-            "RL_foot": {"center_xy": (-0.10,  0.20), "half": (0.06,0.06), "top_z": 0.01},
-            "RR_foot": {"center_xy": (-0.10, -0.20), "half": (0.06,0.06), "top_z": 0.01},
+            "FL_foot": {"center_xy": (0.25,  0.15), "half": (0.06,0.06), "top_z": 0.01},
+            "RL_foot": {"center_xy": (-0.15,  0.15), "half": (0.06,0.06), "top_z": 0.01},
+            "RR_foot": {"center_xy": (-0.15, -0.15), "half": (0.06,0.06), "top_z": 0.01},
         })
         # top_z を一定値でなく地形高さ関数で決めたい場合は、ここに関数を差す:
         # self.height_fn: callable | None = your_height_function  # (B,2)->(B,)
@@ -387,38 +387,6 @@ class MultiLegBaseCommand(CommandTerm):
             out[:, 3*i:3*(i+1)] = leg_targets_b[leg]
         self._command = out  # [B,12]
 
-    
-
-
-    
-    # def _set_debug_vis_impl(self, debug_vis: bool):
-    #     self._debug = debug_vis
-
-    #     # ★ 親 __init__ から先に呼ばれても落ちないようにする
-    #     if not hasattr(self, "_goal_markers"):
-    #         self._goal_markers: Dict[str, VisualizationMarkers] = {}
-    #     if not hasattr(self, "_foot_markers"):
-    #         self._foot_markers: Dict[str, VisualizationMarkers] = {}
-
-    #     if not debug_vis:
-    #         for d in (self._goal_markers, self._foot_markers):
-    #             for m in d.values():
-    #                 m.set_visibility(False)
-    #         return
-
-    #     # ★ 初回作成
-    #     if not self._goal_markers:
-    #         for leg in LEG_ORDER:
-    #             self._goal_markers[leg] = VisualizationMarkers(
-    #                 self.cfg.goal_pose_visualizer_cfg
-    #             )
-    #             self._foot_markers[leg] = VisualizationMarkers(
-    #                 self.cfg.feet_pose_visualizer_cfg
-    #             )
-
-    #     for d in (self._goal_markers, self._foot_markers):
-    #         for m in d.values():
-    #             m.set_visibility(True)
 
 
     
@@ -521,4 +489,493 @@ class MultiLegBaseCommand(CommandTerm):
     
 
 
+
+
+
+class MultiLegBaseCommand2(CommandTerm):
+    def __init__(self, cfg, env):
+        super().__init__(cfg, env)
+        self.env = env
+        B, dev = self.num_envs, self.device
+
+        self._command = torch.zeros(B, 3*len(LEG_ORDER), device=dev)
+
+        # ---- 設定 ----
+        # ブロック上のローカル [ux,uy] の範囲と高さオフセット（全脚共通）
+        self.block_local_offset_range: Tuple[float,float] = getattr(
+            cfg, "block_local_offset_range", (-0.08, 0.08)
+        )
+        self.block_top_offset: float = getattr(cfg, "block_top_offset", 0.15)
+
+        # ★ 脚ごとの対応ブロック名
+        #   Stone3/4/5/6 はシーン側の rigid_objects のキーに合わせて適宜変えてください
+        self.leg_block_keys: Dict[str, str] = getattr(cfg, "leg_block_keys", {
+            "FL_foot": "stone3",
+            "FR_foot": "stone6",
+            "RL_foot": "stone4",
+            "RR_foot": "stone5",
+        })
+
+        # ★ 各脚のブロックローカル座標 [ux, uy]
+        self._local_xy: Dict[str, torch.Tensor] = {
+            leg: torch.zeros(B, 2, device=dev) for leg in LEG_ORDER
+        }
+
+        # （もう ped_areas/height_fn は使わないなら削除してOK）
+        self.height_fn = None
+
+        self._goal_markers: Dict[str, VisualizationMarkers] = {}
+        self._foot_markers: Dict[str, VisualizationMarkers] = {}
+
+        # 初回サンプル
+        self._resample_command(range(B))
+
+
+    
+    # --- 必須: 実装フック ---
+    def _update_metrics(self):
+        # ここでは特に何もしない（任意でログを更新可）
+        pass
+
+
+
+    @property
+    def command(self) -> torch.Tensor:
+        return self._command
+
+    # --------- サンプリング ---------
+    def _sample_square(self, n, lo, hi):
+        x = torch.empty(n, device=self.device).uniform_(lo, hi)
+        y = torch.empty(n, device=self.device).uniform_(lo, hi)
+        return torch.stack([x,y], -1)
+
+    
+    def _resample_command(self, env_ids=None):
+        dev = self.device
+
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, device=dev, dtype=torch.long)
+        else:
+            if not isinstance(env_ids, torch.Tensor):
+                env_ids = torch.as_tensor(env_ids, device=dev, dtype=torch.long)
+
+        blo_lo, blo_hi = self.block_local_offset_range
+
+        # ★ 全脚分のブロックローカル座標をサンプル
+        for leg in LEG_ORDER:
+            self._local_xy[leg][env_ids] = self._sample_square(env_ids.numel(), blo_lo, blo_hi)
+
+        self._update_command()
+
+        self.metrics.setdefault("resample_count", torch.zeros(self.num_envs, device=dev))
+        self.metrics["resample_count"][env_ids] += 1.0
+
+    
+    def _update_command(self):
+        B, dev = self.num_envs, self.device
+        scene = self.env.scene
+
+        # ベース姿勢
+        robot = scene.articulations["robot"]
+        base_p = robot.data.root_pos_w                  # [B,3]
+        base_q = robot.data.root_quat_w                 # [B,4] wxyz
+        R_wb3  = _rot3_from_quat_wxyz(base_q).transpose(-1, -2)  # world->base
+
+        leg_targets_b: Dict[str, torch.Tensor] = {}
+
+        # ★ 各脚ごとに対応ブロックから target を計算
+        for leg in LEG_ORDER:
+            block_name = self.leg_block_keys[leg]
+            block = scene.rigid_objects[block_name]
+
+            blk_pos_w, blk_quat_w = _rigid_pos_quat_w(block)   # [B,3], [B,4]
+            yaw_blk = _yaw_from_quat_wxyz(blk_quat_w)          # [B]
+            R_bw2   = _rot2d(yaw_blk)                          # [B,2,2]
+
+            # ローカル [ux,uy] -> world XY
+            local_xy = self._local_xy[leg]                     # [B,2]
+            t_xy_w = (R_bw2 @ local_xy.unsqueeze(-1)).squeeze(-1) + blk_pos_w[..., :2]
+            t_z_w  = blk_pos_w[..., 2] + self.block_top_offset
+
+            t_w = torch.cat([t_xy_w, t_z_w.unsqueeze(-1)], dim=-1)   # [B,3]
+
+            # world -> base
+            leg_targets_b[leg] = (R_wb3 @ (t_w - base_p).unsqueeze(-1)).squeeze(-1)  # [B,3]
+
+        # 出力（FL,FR,RL,RR）order
+        out = torch.zeros(B, 3*len(LEG_ORDER), device=dev, dtype=base_p.dtype)
+        for i, leg in enumerate(LEG_ORDER):
+            out[:, 3*i:3*(i+1)] = leg_targets_b[leg]
+
+        self._command = out  # [B,12]
+
+    
+    def _set_debug_vis_impl(self, debug_vis: bool):
+        self._debug = debug_vis
+
+        # 親 __init__ から呼ばれたときでも安全なように、必ず dict を持たせる
+        if not hasattr(self, "_goal_markers"):
+            self._goal_markers: Dict[str, VisualizationMarkers] = {}
+        if not hasattr(self, "_foot_markers"):
+            self._foot_markers: Dict[str, VisualizationMarkers] = {}
+
+        # 可視化 OFF → あるものは全部非表示にして終了
+        if not debug_vis:
+            for d in (self._goal_markers, self._foot_markers):
+                for m in d.values():
+                    m.set_visibility(False)
+            return
+
+        # 可視化 ON → 全ての脚について marker を「存在させる」
+        for leg in LEG_ORDER:
+            if leg not in self._goal_markers:
+                self._goal_markers[leg] = VisualizationMarkers(
+                    self.cfg.goal_pose_visualizer_cfg
+                )
+            if leg not in self._foot_markers:
+                self._foot_markers[leg] = VisualizationMarkers(
+                    self.cfg.feet_pose_visualizer_cfg
+                )
+
+        # ON にしたタイミングで全部可視化
+        for d in (self._goal_markers, self._foot_markers):
+            for m in d.values():
+                m.set_visibility(True)
+
+
+    def _debug_vis_callback(self, event):
+        # markers がまだなければここで必ず作る
+        if not hasattr(self, "_goal_markers") or not self._goal_markers:
+            self._set_debug_vis_impl(True)
+
+        robot = self.env.scene.articulations["robot"]
+
+        # 対応ブロックを全部取得
+        blocks = {
+            name: self.env.scene.rigid_objects[name]
+            for name in set(self.leg_block_keys.values())
+        }
+
+        # 初期化待ち
+        if (not robot.is_initialized) or any(not b.is_initialized for b in blocks.values()):
+            return
+
+        B, dev = self.num_envs, self.device
+
+        goal_w: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {}
+
+        # ★ 各脚の目標 (world) を計算
+        for leg in LEG_ORDER:
+            block_name = self.leg_block_keys[leg]
+            block = blocks[block_name]
+
+            blk_pos_w, blk_quat_w = _rigid_pos_quat_w(block)      # [B,3], [B,4](wxyz)
+            yaw_blk = _yaw_from_quat_wxyz(blk_quat_w)             # [B]
+            R_bw2   = _rot2d(yaw_blk)                             # [B,2,2]
+
+            local_xy = self._local_xy[leg]                        # [B,2]
+            t_xy_w = (R_bw2 @ local_xy.unsqueeze(-1)).squeeze(-1) + blk_pos_w[..., :2]
+            t_z_w  = blk_pos_w[..., 2] + self.block_top_offset
+
+            pos = torch.cat([t_xy_w, t_z_w.unsqueeze(-1)], dim=-1)         # [B,3]
+            quat = _quat_from_yaw(yaw_blk)                                  # [B,4] ブロックと同じ yaw
+
+            goal_w[leg] = (pos, quat)
+
+        # ---- 足先 現在値 (world) ----
+        def _foot_pose_w(leg_name):
+            idx = robot.body_names.index(leg_name)
+            if hasattr(robot.data, "body_link_pose_w"):
+                pose = robot.data.body_link_pose_w[:, idx]  # [B,7]
+                return pose[:, :3], pose[:, 3:7]
+            else:
+                pos = robot.data.body_pos_w[:, idx, :3]
+                quat = getattr(
+                    robot.data,
+                    "body_quat_w",
+                    getattr(robot.data, "body_orient_w")
+                )[:, idx, :4]
+                return pos, quat
+
+        # ---- 描画 ----
+        for leg in LEG_ORDER:
+            gp, gq = goal_w[leg]        # [B,3], [B,4]
+            fp, fq = _foot_pose_w(leg)  # [B,3], [B,4]
+            self._goal_markers[leg].visualize(gp, gq)
+            self._foot_markers[leg].visualize(fp, fq)
+
+
+
+
+
+
+
+class MultiLegBaseCommand3(CommandTerm):
+    def __init__(self, cfg, env):
+        super().__init__(cfg, env)
+        self.env = env
+        B, dev = self.num_envs, self.device
+
+        self._command = torch.zeros(B, 3*len(LEG_ORDER), device=dev)
+
+        # ローカル [ux,uy] と高さオフセット（全脚共通）
+        self.block_local_offset_range: Tuple[float,float] = getattr(
+            cfg, "block_local_offset_range", (-0.08, 0.08)
+        )
+        self.block_top_offset: float = getattr(cfg, "block_top_offset", 0.15)
+
+        # --- ★ フェーズごとの「脚 → ブロック名」テーブル ---
+        # cfg.params.phase_block_keys に渡しておく想定
+        # 無ければ従来の leg_block_keys 1 フェーズ版として初期化
+        P = getattr(cfg, "params", {})
+        phase_block_keys_cfg = P.get("phase_block_keys", None)
+        leg_block_keys_cfg   = P.get("leg_block_keys", None)
+
+        if phase_block_keys_cfg is None:
+            print("No block keys !!!!!!!!")
+            if leg_block_keys_cfg is None:
+                leg_block_keys_cfg = {
+                    "FL_foot": "stone3",
+                    "FR_foot": "stone6",
+                    "RL_foot": "stone4",
+                    "RR_foot": "stone5",
+                }
+            # phase 0 だけ持つ1フェーズ版にフォールバック
+            phase_block_keys_cfg = {0: leg_block_keys_cfg}
+
+        self.phase_block_keys: dict[int, dict[str, str]] = phase_block_keys_cfg
+
+        # フェーズ番号のチェック
+        self.phases = sorted(self.phase_block_keys.keys())
+        self.num_phases = len(self.phases)
+
+        # 各フェーズで全脚に対するブロック名があるかチェック
+        for ph, mp in self.phase_block_keys.items():
+            for leg in LEG_ORDER:
+                if leg not in mp:
+                    raise RuntimeError(
+                        f"phase_block_keys[{ph}] に脚 '{leg}' のブロック指定がありません。"
+                    )
+
+        # ★ 各 env の現在フェーズ (0,1,2,...)
+        self.phase = torch.zeros(B, dtype=torch.long, device=dev)
+
+        # ブロック参照をキャッシュしておく
+        scene = env.scene
+        self.blocks_by_phase: dict[int, dict[str, omni.isaac.lab.assets.RigidObject]] = {}
+        for ph, mp in self.phase_block_keys.items():
+            self.blocks_by_phase[ph] = {
+                leg: scene.rigid_objects[blk_name] for leg, blk_name in mp.items()
+            }
+
+        # 脚ごとのローカル座標 [ux,uy]
+        self._local_xy: Dict[str, torch.Tensor] = {
+            leg: torch.zeros(B, 2, device=dev) for leg in LEG_ORDER
+        }
+
+        self._goal_markers = {}
+        self._foot_markers = {}
+
+        self._resample_command(range(B))
+
+    # envごとのフェーズを外から変えられるAPI
+    def set_phase(self, env_ids, phase: int):
+        dev = self.device
+        if phase not in self.phase_block_keys:
+            raise RuntimeError(f"phase={phase} は phase_block_keys に存在しません。")
+
+        if not isinstance(env_ids, torch.Tensor):
+            env_ids = torch.as_tensor(env_ids, device=dev, dtype=torch.long)
+
+        self.phase[env_ids] = phase
+        self._update_command()
+
+    
+    # --- 必須: 実装フック ---
+    def _update_metrics(self):
+        # ここでは特に何もしない（任意でログを更新可）
+        pass
+
+
+    @property
+    def command(self) -> torch.Tensor:
+        return self._command
+    
+
+    def _sample_square(self, n, lo, hi):
+        x = torch.empty(n, device=self.device).uniform_(lo, hi)
+        y = torch.empty(n, device=self.device).uniform_(lo, hi)
+        return torch.stack([x, y], -1)
+
+    def _resample_command(self, env_ids=None):
+        dev = self.device
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, device=dev, dtype=torch.long)
+        else:
+            if not isinstance(env_ids, torch.Tensor):
+                env_ids = torch.as_tensor(env_ids, device=dev, dtype=torch.long)
+
+        blo_lo, blo_hi = self.block_local_offset_range
+        for leg in LEG_ORDER:
+            self._local_xy[leg][env_ids] = self._sample_square(env_ids.numel(), blo_lo, blo_hi)
+
+        self._update_command()
+
+        self.metrics.setdefault("resample_count", torch.zeros(self.num_envs, device=dev))
+        self.metrics["resample_count"][env_ids] += 1.0
+
+    
+
+    def _update_command(self):
+        B, dev = self.num_envs, self.device
+        scene = self.env.scene
+
+        # ベース姿勢
+        robot = scene.articulations["robot"]
+        base_p = robot.data.root_pos_w
+        base_q = robot.data.root_quat_w
+        R_wb3  = _rot3_from_quat_wxyz(base_q).transpose(-1, -2)  # world→base
+
+        # 出力バッファ
+        out = torch.zeros(B, 3*len(LEG_ORDER), device=dev, dtype=base_p.dtype)
+
+        # フェーズごとのマスクをあらかじめ作っておく
+        phase_masks: dict[int, torch.Tensor] = {}
+        for ph in self.phases:
+            phase_masks[ph] = (self.phase == ph)  # [B] bool
+
+        for i, leg in enumerate(LEG_ORDER):
+            # --- 1) 各フェーズのブロック姿勢を取得 ---
+            # pos_ph[ph]: [B,3], quat_ph[ph]: [B,4]
+            pos_ph: dict[int, torch.Tensor] = {}
+            quat_ph: dict[int, torch.Tensor] = {}
+            for ph in self.phases:
+                block = self.blocks_by_phase[ph][leg]
+                p_w, q_w = _rigid_pos_quat_w(block)
+                pos_ph[ph]  = p_w
+                quat_ph[ph] = q_w
+
+            # --- 2) envごとに phase に応じて block pos/quat を切り替え ---
+            leg_pos_w = torch.zeros_like(base_p)
+            leg_quat_w = torch.zeros_like(base_q)
+            for ph in self.phases:
+                m = phase_masks[ph]
+                if not m.any():
+                    continue
+                leg_pos_w[m]  = pos_ph[ph][m]
+                leg_quat_w[m] = quat_ph[ph][m]
+
+            # --- 3) ローカル [ux,uy] を block→world へ ---
+            yaw_blk = _yaw_from_quat_wxyz(leg_quat_w)   # [B]
+            R_bw2   = _rot2d(yaw_blk)                   # [B,2,2]
+
+            local_xy = self._local_xy[leg]              # [B,2]
+            t_xy_w = (R_bw2 @ local_xy.unsqueeze(-1)).squeeze(-1) + leg_pos_w[..., :2]
+            t_z_w  = leg_pos_w[..., 2] + self.block_top_offset
+
+            t_w = torch.cat([t_xy_w, t_z_w.unsqueeze(-1)], dim=-1)  # [B,3]
+
+            # --- 4) world → base へ ---
+            leg_b = (R_wb3 @ (t_w - base_p).unsqueeze(-1)).squeeze(-1)  # [B,3]
+
+            out[:, 3*i:3*(i+1)] = leg_b
+
+        self._command = out  # [B,12]
+
+    
+
+
+    def _set_debug_vis_impl(self, debug_vis: bool):
+        self._debug = debug_vis
+
+        # 親 __init__ から呼ばれたときでも安全なように、必ず dict を持たせる
+        if not hasattr(self, "_goal_markers"):
+            self._goal_markers: Dict[str, VisualizationMarkers] = {}
+        if not hasattr(self, "_foot_markers"):
+            self._foot_markers: Dict[str, VisualizationMarkers] = {}
+
+        # 可視化 OFF → あるものは全部非表示にして終了
+        if not debug_vis:
+            for d in (self._goal_markers, self._foot_markers):
+                for m in d.values():
+                    m.set_visibility(False)
+            return
+
+        # 可視化 ON → 全ての脚について marker を「存在させる」
+        for leg in LEG_ORDER:
+            if leg not in self._goal_markers:
+                self._goal_markers[leg] = VisualizationMarkers(
+                    self.cfg.goal_pose_visualizer_cfg
+                )
+            if leg not in self._foot_markers:
+                self._foot_markers[leg] = VisualizationMarkers(
+                    self.cfg.feet_pose_visualizer_cfg
+                )
+
+        # ON にしたタイミングで全部可視化
+        for d in (self._goal_markers, self._foot_markers):
+            for m in d.values():
+                m.set_visibility(True)
+
+
+    def _debug_vis_callback(self, event):
+        # markers がまだなければここで必ず作る
+        if not hasattr(self, "_goal_markers") or not self._goal_markers:
+            self._set_debug_vis_impl(True)
+
+        robot = self.env.scene.articulations["robot"]
+
+        # 対応ブロックを全部取得
+        blocks = {
+            name: self.env.scene.rigid_objects[name]
+            for name in set(self.leg_block_keys.values())
+        }
+
+        # 初期化待ち
+        if (not robot.is_initialized) or any(not b.is_initialized for b in blocks.values()):
+            return
+
+        B, dev = self.num_envs, self.device
+
+        goal_w: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {}
+
+        # ★ 各脚の目標 (world) を計算
+        for leg in LEG_ORDER:
+            block_name = self.leg_block_keys[leg]
+            block = blocks[block_name]
+
+            blk_pos_w, blk_quat_w = _rigid_pos_quat_w(block)      # [B,3], [B,4](wxyz)
+            yaw_blk = _yaw_from_quat_wxyz(blk_quat_w)             # [B]
+            R_bw2   = _rot2d(yaw_blk)                             # [B,2,2]
+
+            local_xy = self._local_xy[leg]                        # [B,2]
+            t_xy_w = (R_bw2 @ local_xy.unsqueeze(-1)).squeeze(-1) + blk_pos_w[..., :2]
+            t_z_w  = blk_pos_w[..., 2] + self.block_top_offset
+
+            pos = torch.cat([t_xy_w, t_z_w.unsqueeze(-1)], dim=-1)         # [B,3]
+            quat = _quat_from_yaw(yaw_blk)                                  # [B,4] ブロックと同じ yaw
+
+            goal_w[leg] = (pos, quat)
+
+        # ---- 足先 現在値 (world) ----
+        def _foot_pose_w(leg_name):
+            idx = robot.body_names.index(leg_name)
+            if hasattr(robot.data, "body_link_pose_w"):
+                pose = robot.data.body_link_pose_w[:, idx]  # [B,7]
+                return pose[:, :3], pose[:, 3:7]
+            else:
+                pos = robot.data.body_pos_w[:, idx, :3]
+                quat = getattr(
+                    robot.data,
+                    "body_quat_w",
+                    getattr(robot.data, "body_orient_w")
+                )[:, idx, :4]
+                return pos, quat
+
+        # ---- 描画 ----
+        for leg in LEG_ORDER:
+            gp, gq = goal_w[leg]        # [B,3], [B,4]
+            fp, fq = _foot_pose_w(leg)  # [B,3], [B,4]
+            self._goal_markers[leg].visualize(gp, gq)
+            self._foot_markers[leg].visualize(fp, fq)
 

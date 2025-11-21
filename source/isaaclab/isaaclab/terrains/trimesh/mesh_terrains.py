@@ -964,6 +964,59 @@ def moat_terrain(difficulty: float, cfg: MeshMoatTerrainCfg):
 
 
 
+# ---- 本体: メッシュ生成 ----------------------------------------------------
+def block_terrain(difficulty: float, cfg: MeshBlockTerrainCfg):
+    """
+    返り値: (List[trimesh.Trimesh], origin: np.ndarray)
+      meshes_list: 三角形メッシュのリスト
+      origin: 地形の原点（ロボット Spawn等の基準）→ [size_x/2, size_y/2, 0]
+    """
+    # パラメータ整理（difficultyはここでは未使用。必要なら moat_width等に掛ける）
+    Lx, Ly   = cfg.size
+    plat_w   = cfg.platform_width
+    moat_w   = cfg.moat_width
+    depth    = cfg.moat_depth
+
+    # 安全帯（中央台）と堀の内外寸
+    inner_hole = (plat_w + 2.0 * moat_w, plat_w + 2.0 * moat_w)  # 穴（=堀範囲の外側境界）
+    assert inner_hole[0] < Lx and inner_hole[1] < Ly, "moat is too wide for terrain size"
+
+    meshes_list = []
+
+    # 1) 堀底の床（z = -depth）
+    floor_center_z = -depth - cfg.floor_thickness / 2.0
+    floor = trimesh.creation.box(
+        (Lx, Ly, cfg.floor_thickness),
+        trimesh.transformations.translation_matrix([Lx / 2.0, Ly / 2.0, floor_center_z])
+    )
+    meshes_list.append(floor)
+
+    # 2) 中央プラットフォーム（天面 z = 0）
+    # plat_center_z = 0.0 - cfg.platform_thickness / 2.0
+    # platform = trimesh.creation.box(
+    #     (plat_w, plat_w, cfg.platform_thickness),
+    #     trimesh.transformations.translation_matrix([Lx / 2.0, Ly / 2.0, plat_center_z])
+    # )
+    # meshes_list.append(platform)
+
+    # 3) 外周リング（天面 z = 0、中央台の周囲を囲う）
+    ring_parts = make_rect_frame(
+        outer_xy=(Lx, Ly),
+        hole_xy=inner_hole,          # 穴 = （中央台 + 堀幅×2）
+        z_top=0.0,
+        thickness=cfg.ring_thickness
+    )
+    meshes_list += ring_parts
+
+    # 4) 原点（地形の幾何中心をXY原点にし、Z=0が“歩行面”）
+    origin = np.array([Lx / 2.0, Ly / 2.0, 0.0], dtype=float)
+
+    return meshes_list, origin
+
+
+
+
+
 # def sinking_tiles_terrain(
 #     difficulty: float, cfg: mesh_terrains_cfg.MeshSinkingTilesTerrainCfg
 # ) -> tuple[list[trimesh.Trimesh], np.ndarray]:
