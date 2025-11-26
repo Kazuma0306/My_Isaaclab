@@ -397,29 +397,45 @@ class MultiLegBaseCommand3Cfg(CommandTermCfg):
     phase_block_keys = {
     # --- Phase 0: 初期状態 (全足が初期ブロックに乗っている) ---
     "0": {
-        "FL_foot": "stone3",
+        "FL_foot": "stone5",
         "FR_foot": "stone6",  # 右前: 現在地
-        "RL_foot": "stone4",
-        "RR_foot": "stone5",  # 右後: 現在地
+        "RL_foot": "stone7",
+        "RR_foot": "stone8",  # 右後: 現在地
     },
     
     # --- Phase 1: 右前足 (FR) だけ前に出す ---
     # 右後ろ足 (RR) のターゲットはまだ "stone5" (現在地) のままにしておくのが重要です！
     "1": {
-        "FL_foot": "stone3",
+        "FL_foot": "stone5",
         "FR_foot": "stone2",  # ★右前: 新しいブロックへ！
-        "RL_foot": "stone4",
-        "RR_foot": "stone5",  # 右後: まだ動かない（支えになる）
+        "RL_foot": "stone7",
+        "RR_foot": "stone8",  # 右後: まだ動かない（支えになる）
     },
 
     # --- Phase 2: 右後ろ足 (RR) を前に出す ---
     # 右前足 (FR) が着地したあと、遅れて右後ろ足を動かします
     # 通常、右後ろ足は「さっき右前足があった場所 (stone6)」などを狙うことが多いです
     "2": {
-        "FL_foot": "stone3",
+        "FL_foot": "stone5",
         "FR_foot": "stone2",  # 右前: 既に移動済み
-        "RL_foot": "stone4",
-        "RR_foot": "stone6",  # ★右後: 右前が居た場所へ移動！
+        "RL_foot": "stone3",
+        "RR_foot": "stone8",  # ★右後: 右前が居た場所へ移動！
     },
+
+    "3": {
+        "FL_foot": "stone1",
+        "FR_foot": "stone2",  # 右前: 既に移動済み
+        "RL_foot": "stone3",
+        "RR_foot": "stone8",  # ★右後: 右前が居た場所へ移動！
+    },
+
+    "4": {
+        "FL_foot": "stone1",
+        "FR_foot": "stone2",  # 右前: 既に移動済み
+        "RL_foot": "stone3",
+        "RR_foot": "stone4",  # ★右後: 右前が居た場所へ移動！
+    },
+
+
     }
 )

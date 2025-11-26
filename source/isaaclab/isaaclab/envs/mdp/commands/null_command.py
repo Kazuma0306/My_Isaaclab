@@ -986,7 +986,7 @@ class MultiLegBaseCommand3(CommandTerm):
 
         # ローカル [ux,uy] と高さオフセット
         self.block_local_offset_range: Tuple[float,float] = getattr(
-            cfg, "block_local_offset_range", (-0.08, 0.08)
+            cfg, "block_local_offset_range", (-0.03, 0.03)
         )
         self.block_top_offset: float = getattr(cfg, "block_top_offset", 0.15)
 
@@ -997,12 +997,12 @@ class MultiLegBaseCommand3(CommandTerm):
 
         if phase_block_keys_cfg is None:
             print("Warning: phase_block_keys not found, falling back to single phase.")
-            if leg_block_keys_cfg is None:
-                leg_block_keys_cfg = {
-                    "FL_foot": "stone3", "FR_foot": "stone6",
-                    "RL_foot": "stone4", "RR_foot": "stone5",
-                }
-            phase_block_keys_cfg = {0: leg_block_keys_cfg}
+            # if leg_block_keys_cfg is None:
+            #     leg_block_keys_cfg = {
+            #         "FL_foot": "stone3", "FR_foot": "stone6",
+            #         "RL_foot": "stone4", "RR_foot": "stone5",
+            #     }
+            # phase_block_keys_cfg = {0: leg_block_keys_cfg}
 
         # ★修正1: キーを強制的に int に変換し、誤って文字列キーが入るのを防ぐ
         self.phase_block_keys: dict[int, dict[str, str]] = {
@@ -1052,8 +1052,31 @@ class MultiLegBaseCommand3(CommandTerm):
         self.phase[env_ids] = phase
         self._update_command()
 
+
+    
+    def advance_phase(self, env_ids):
+        dev = self.device
+        if not isinstance(env_ids, torch.Tensor):
+            env_ids = torch.as_tensor(env_ids, device=dev, dtype=torch.long)
+        if env_ids.numel() == 0:
+            return
+
+        self.phase[env_ids] += 1
+        self.phase[env_ids] = self.phase[env_ids].clamp(0, self.num_phases - 1)
+
+        self._update_command()
+        # 1000番目の環境の情報を代表して表示 (10ステップに1回)
+        # if self.env.common_step_counter % 10 == 0:
+        env_0_phase = self.phase[0].item()
+        print(f"[Check] Phase: {env_0_phase}")
+
+    
+
     def _update_metrics(self):
         pass
+
+
+
 
     @property
     def command(self) -> torch.Tensor:
@@ -1117,7 +1140,7 @@ class MultiLegBaseCommand3(CommandTerm):
                 if idxs.numel() == 0:
                     continue
 
-                block = self.blocks_by_phase[ph][leg]
+                block = self.blocks_by_phase[ph][leg]#フェーズごとに変わるブロック配列を取得、そこから座標を取得
                 pos_w, quat_w = _rigid_pos_quat_w(block)
 
                 leg_pos_w[idxs]  = pos_w[idxs]
@@ -1143,10 +1166,7 @@ class MultiLegBaseCommand3(CommandTerm):
 
 
 
-            # 0番目の環境の情報を代表して表示 (10ステップに1回)
-            if self.env.common_step_counter % 10 == 0:
-                env_0_phase = self.phase[0].item()
-                print(f"[Check] Phase: {env_0_phase}")
+            
 
         self._command = out
 
