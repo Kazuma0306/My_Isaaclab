@@ -986,7 +986,7 @@ class MultiLegBaseCommand3(CommandTerm):
 
         # ローカル [ux,uy] と高さオフセット
         self.block_local_offset_range: Tuple[float,float] = getattr(
-            cfg, "block_local_offset_range", (-0.03, 0.03)
+            cfg, "block_local_offset_range", (-0.00, 0.00)
         )
         self.block_top_offset: float = getattr(cfg, "block_top_offset", 0.15)
 
@@ -1043,6 +1043,8 @@ class MultiLegBaseCommand3(CommandTerm):
         # 初回実行
         self._resample_command(range(B))
 
+
+
     def set_phase(self, env_ids, phase: int):
         dev = self.device
         if phase not in self.phase_block_keys:
@@ -1050,7 +1052,10 @@ class MultiLegBaseCommand3(CommandTerm):
         if not isinstance(env_ids, torch.Tensor):
             env_ids = torch.as_tensor(env_ids, device=dev, dtype=torch.long)
         self.phase[env_ids] = phase
-        self._update_command()
+        # self._update_command()
+
+        self._resample_command(env_ids)
+
 
 
     
@@ -1064,7 +1069,10 @@ class MultiLegBaseCommand3(CommandTerm):
         self.phase[env_ids] += 1
         self.phase[env_ids] = self.phase[env_ids].clamp(0, self.num_phases - 1)
 
-        self._update_command()
+        # self._update_command()
+
+        self._resample_command(env_ids)
+
         # 1000番目の環境の情報を代表して表示 (10ステップに1回)
         # if self.env.common_step_counter % 10 == 0:
         env_0_phase = self.phase[0].item()
