@@ -11,7 +11,7 @@ from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
 from isaaclab.utils import configclass
 
-from .null_command import NullCommand, StepFRToBlockCommand, MultiLegBaseCommand, MultiLegBaseCommand2, MultiLegBaseCommand3
+from .null_command import NullCommand, StepFRToBlockCommand, MultiLegBaseCommand, MultiLegBaseCommand2, MultiLegBaseCommand3, FootstepFromHighLevel
 from .pose_2d_command import TerrainBasedPose2dCommand, UniformPose2dCommand
 from .pose_command import UniformPoseCommand
 from .velocity_command import NormalVelocityCommand, UniformVelocityCommand
@@ -468,3 +468,17 @@ class MultiLegBaseCommand3Cfg(CommandTermCfg):
 
     }
 )
+
+
+
+
+#For High layer
+
+@configclass
+class FootstepFromHighLevelCfg(CommandTermCfg):
+    # class_type: typeFor High layer[CommandTerm] = FootstepFromHighLevel
+
+    class_type: type = FootstepFromHighLevel
+
+    command_dim: int = 12   # 4 脚 x 3 (xyz)
+    resampling_time_range: tuple[float, float] = (1e9, 1e9)  # ほぼ resample しない

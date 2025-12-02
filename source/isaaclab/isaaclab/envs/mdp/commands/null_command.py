@@ -1224,3 +1224,25 @@ class MultiLegBaseCommand3(CommandTerm):
                 fq = getattr(robot.data, "body_quat_w", getattr(robot.data, "body_orient_w"))[:, idx, :4]
             
             self._foot_markers[leg].visualize(fp, fq)
+
+
+
+
+class FootstepFromHighLevel(CommandTerm):
+    def __init__(self, cfg: FootstepFromHighLevelCfg, env):
+        super().__init__(cfg, env)
+        self._command = torch.zeros(self.num_envs, cfg.command_dim, device=self.device)
+
+    @property
+    def command(self):
+        return self._command
+
+    # 上位から書き換えて使うので、resample/update は何もしないでOK
+    def _resample_command(self, env_ids):
+        pass
+
+    def _update_command(self):
+        pass
+
+    def _update_metrics(self):
+        pass
