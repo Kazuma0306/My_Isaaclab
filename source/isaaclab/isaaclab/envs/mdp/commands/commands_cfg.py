@@ -297,17 +297,17 @@ class MultiLegBaseCommandCfg(CommandTermCfg):
     debug_vis: bool = True
 
     # --- FR = ブロックから生成するターゲット ---
-    block_name: str = "stone2"
-    fr_local_offset_range: tuple[float, float] = (-0.05, 0.05)  # ブロック上面ローカル (ux,uy) の一様分布
-    block_top_offset: float = 0.15  # ブロック上面からのZオフセット（可視化/誘導用）
+    # block_name: str = "stone2"
+    # fr_local_offset_range: tuple[float, float] = (-0.05, 0.05)  # ブロック上面ローカル (ux,uy) の一様分布
+    # block_top_offset: float = 0.15  # ブロック上面からのZオフセット（可視化/誘導用）
 
-    # --- 他脚の固定ターゲット（ベース座標系, 単位[m]）---
-    #   例は GO2 くらいの寸法を想定。実機/モデルに合わせて調整してください。
-    fixed_targets_b: dict[str, tuple[float, float, float]] = {
-        "FL_foot": ( 0.25,  0.18, 0.0),
-        "RL_foot": (-0.25,  0.18, 0.0),
-        "RR_foot": (-0.25, -0.18, 0.0),
-    }
+    # # --- 他脚の固定ターゲット（ベース座標系, 単位[m]）---
+    # #   例は GO2 くらいの寸法を想定。実機/モデルに合わせて調整してください。
+    # fixed_targets_b: dict[str, tuple[float, float, float]] = {
+    #     "FL_foot": ( 0.25,  0.18, 0.0),
+    #     "RL_foot": (-0.25,  0.18, 0.0),
+    #     "RR_foot": (-0.25, -0.18, 0.0),
+    # }
 
     # ロボットの脚ボディ名（順序は環境に合わせて）
     leg_names: tuple[str, ...] = ("FL_foot", "FR_foot", "RL_foot", "RR_foot")
@@ -327,7 +327,7 @@ class MultiLegBaseCommandCfg(CommandTermCfg):
 
 
 
-# --- 設定クラス: CommandTermCfg を継承 ---
+# # --- 設定クラス: CommandTermCfg を継承 ---
 @configclass
 class MultiLegBaseCommand2Cfg(CommandTermCfg):
 
