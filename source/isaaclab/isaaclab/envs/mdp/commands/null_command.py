@@ -965,10 +965,21 @@ class MultiLegBaseCommand3(CommandTerm):
 
 
 
+
+from isaaclab.utils.math import quat_apply
+
 class FootstepFromHighLevel(CommandTerm):
     def __init__(self, cfg: FootstepFromHighLevelCfg, env):
         super().__init__(cfg, env)
         self._command = torch.zeros(self.num_envs, cfg.command_dim, device=self.device)
+
+        # ★修正2: デバッグ用キャッシュの初期化
+        # _debug_vis_callback で計算済みの値を使うために用意
+        self._debug_goal_w_cache = {}
+        self._debug_goal_quat_cache = {}
+
+        self._goal_markers = {}
+        self._foot_markers = {}
 
     @property
     def command(self):
@@ -983,6 +994,84 @@ class FootstepFromHighLevel(CommandTerm):
 
     def _update_metrics(self):
         pass
+
+    def set_foot_targets_base(self, foot_targets_b: torch.Tensor):
+        """
+        上位ポリシーが出した足置き目標を base 座標系で受け取る。
+        foot_targets_b: [num_envs, 4, 3]  (FR, FL, RR, RL)
+        """
+        B = self.num_envs
+        assert foot_targets_b.shape == (B, len(LEG_ORDER), 3)
+
+        # 1) そのまま command に突っ込む（下位への観測用）
+        #    （自分のエンコード仕様に合わせて書き換えてOK）
+        self._command[:] = foot_targets_b.reshape(B, -1)
+
+        # 2) デバッグ用にワールド座標へ変換してキャッシュ
+        robot = self.env.scene.articulations["robot"]
+        base_pos_w = robot.data.root_state_w[:, 0:3]   # [B,3]
+        base_quat_w = robot.data.root_state_w[:, 3:7]  # [B,4]
+
+        # base -> world
+        # foot_targets_b: [B,4,3]
+        
+        targets_w = quat_apply(base_quat_w.unsqueeze(1), foot_targets_b) \
+                    + base_pos_w.unsqueeze(1)           # [B,4,3]
+
+        # 各脚ごとにキャッシュ
+        for leg_i, leg in enumerate(LEG_ORDER):
+            gp = targets_w[:, leg_i, :]        # [B,3]
+            # ここでは向きは「上向き」固定でOKなら単位クォータニオン
+            gq = torch.zeros(B, 4, device=self.device)
+            gq[:, 3] = 1.0
+
+            self._debug_goal_w_cache[leg] = gp
+            self._debug_goal_quat_cache[leg] = gq
+
+    def _set_debug_vis_impl(self, debug_vis: bool):
+        self._debug = debug_vis
+        if not hasattr(self, "_goal_markers"): self._goal_markers = {}
+        if not hasattr(self, "_foot_markers"): self._foot_markers = {}
+
+        if not debug_vis:
+            for d in (self._goal_markers, self._foot_markers):
+                for m in d.values(): m.set_visibility(False)
+            return
+
+        for leg in LEG_ORDER:
+            if leg not in self._goal_markers:
+                self._goal_markers[leg] = VisualizationMarkers(self.cfg.goal_pose_visualizer_cfg)
+            if leg not in self._foot_markers:
+                self._foot_markers[leg] = VisualizationMarkers(self.cfg.feet_pose_visualizer_cfg)
+
+        for d in (self._goal_markers, self._foot_markers):
+            for m in d.values(): m.set_visibility(True)
+
+    def _debug_vis_callback(self, event):
+        if not hasattr(self, "_goal_markers") or not self._goal_markers:
+            self._set_debug_vis_impl(True)
+        
+        robot = self.env.scene.articulations["robot"]
+        if not robot.is_initialized: return
+
+        for leg in LEG_ORDER:
+            # update_command で計算して保存した値をここで描画
+            gp = self._debug_goal_w_cache.get(leg, None)
+            gq = self._debug_goal_quat_cache.get(leg, None)
+            
+            if gp is not None and gq is not None:
+                self._goal_markers[leg].visualize(gp, gq)
+
+            # 足の現在位置
+            idx = robot.body_names.index(leg)
+            if hasattr(robot.data, "body_link_pose_w"):
+                pose = robot.data.body_link_pose_w[:, idx]
+                fp, fq = pose[:, :3], pose[:, 3:7]
+            else:
+                fp = robot.data.body_pos_w[:, idx, :3]
+                fq = getattr(robot.data, "body_quat_w", getattr(robot.data, "body_orient_w"))[:, idx, :4]
+            
+            self._foot_markers[leg].visualize(fp, fq)
 
 
 

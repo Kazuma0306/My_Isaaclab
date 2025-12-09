@@ -482,3 +482,19 @@ class FootstepFromHighLevelCfg(CommandTermCfg):
 
     command_dim: int = 12   # 4 脚 x 3 (xyz)
     resampling_time_range: tuple[float, float] = (1e9, 1e9)  # ほぼ resample しない
+
+    debug_vis: bool = True
+
+    
+    # --- 可視化（Wxyz で渡す）---
+    # FR の目標姿勢を表示
+    goal_pose_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
+        prim_path="/Visuals/Command/goal_pose"
+    )
+    goal_pose_visualizer_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
+
+    # 各脚ターゲットの表示（小さめ）
+    feet_pose_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
+        prim_path="/Visuals/Command/goal_pose"
+    )
+    feet_pose_visualizer_cfg.markers["frame"].scale = (0.07, 0.07, 0.07)
