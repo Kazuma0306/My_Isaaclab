@@ -936,6 +936,9 @@ class MultiLegBaseCommand3(CommandTerm):
         for d in (self._goal_markers, self._foot_markers):
             for m in d.values(): m.set_visibility(True)
 
+
+
+
     def _debug_vis_callback(self, event):
         if not hasattr(self, "_goal_markers") or not self._goal_markers:
             self._set_debug_vis_impl(True)
@@ -971,6 +974,7 @@ from isaaclab.utils.math import quat_apply
 class FootstepFromHighLevel(CommandTerm):
     def __init__(self, cfg: FootstepFromHighLevelCfg, env):
         super().__init__(cfg, env)
+        self.env = env
         self._command = torch.zeros(self.num_envs, cfg.command_dim, device=self.device)
 
         # ★修正2: デバッグ用キャッシュの初期化
@@ -995,38 +999,111 @@ class FootstepFromHighLevel(CommandTerm):
     def _update_metrics(self):
         pass
 
-    def set_foot_targets_base(self, foot_targets_b: torch.Tensor):
+    
+    def set_foot_targets_base(self, flat_or_batched: torch.Tensor):
         """
-        上位ポリシーが出した足置き目標を base 座標系で受け取る。
-        foot_targets_b: [num_envs, 4, 3]  (FR, FL, RR, RL)
+        flat_or_batched: [B,12] または [B,4,3]
+        ベース座標系の足ターゲットとして解釈する。
         """
         B = self.num_envs
-        assert foot_targets_b.shape == (B, len(LEG_ORDER), 3)
+        dev = self.device
 
-        # 1) そのまま command に突っ込む（下位への観測用）
-        #    （自分のエンコード仕様に合わせて書き換えてOK）
-        self._command[:] = foot_targets_b.reshape(B, -1)
+        # --- 1) 入力を [B,4,3] の base座標にそろえる ---
+        if flat_or_batched.ndim == 2:
+            assert flat_or_batched.shape[1] == 12
+            foot_targets_b = flat_or_batched.view(B, 4, 3)
+        else:
+            assert flat_or_batched.shape == (B, 4, 3)
+            foot_targets_b = flat_or_batched
 
-        # 2) デバッグ用にワールド座標へ変換してキャッシュ
+        # ★ ここが超重要：commandには **base座標のまま** を入れる
+        self._command[:, :] = foot_targets_b.view(B, -1)
+
+        # --- 2) ここから下は「可視化用に world に直すだけ」 ---
+
         robot = self.env.scene.articulations["robot"]
-        base_pos_w = robot.data.root_state_w[:, 0:3]   # [B,3]
-        base_quat_w = robot.data.root_state_w[:, 3:7]  # [B,4]
+        base_pos_w = robot.data.root_pos_w      # [B,3]
+        base_quat_w = robot.data.root_quat_w    # [B,4]
+
+        from isaaclab.utils.math import quat_apply
 
         # base -> world
-        # foot_targets_b: [B,4,3]
-        
-        targets_w = quat_apply(base_quat_w.unsqueeze(1), foot_targets_b) \
-                    + base_pos_w.unsqueeze(1)           # [B,4,3]
+        vec_b  = foot_targets_b.view(B * 4, 3)       # [B*4,3]
+        quat_b = base_quat_w.unsqueeze(1).expand(-1, 4, -1).reshape(B * 4, 4)
 
-        # 各脚ごとにキャッシュ
+        vec_w = quat_apply(quat_b, vec_b)            # [B*4,3]
+        base_pos_rep = base_pos_w.unsqueeze(1).expand(-1, 4, -1)  # [B,4,3]
+        targets_w = vec_w.view(B, 4, 3) + base_pos_rep            # [B,4,3]
+
+        # デバッグ用キャッシュ (world)
         for leg_i, leg in enumerate(LEG_ORDER):
-            gp = targets_w[:, leg_i, :]        # [B,3]
-            # ここでは向きは「上向き」固定でOKなら単位クォータニオン
-            gq = torch.zeros(B, 4, device=self.device)
-            gq[:, 3] = 1.0
-
+            gp = targets_w[:, leg_i, :]                      # [B,3]
+            gq = torch.zeros(B, 4, device=dev); gq[:, 3] = 1
             self._debug_goal_w_cache[leg] = gp
             self._debug_goal_quat_cache[leg] = gq
+
+    # def set_foot_targets_base(self, foot_targets_b):
+    #     """
+    #     上位ポリシーが出した足置き目標を base 座標系で受け取る。
+    #     foot_targets_b: [num_envs, 4, 3]  (FR, FL, RR, RL)
+    #     """
+    #     B = self.num_envs
+    #     # assert foot_targets_b.shape == (B, len(LEG_ORDER), 3)
+
+    #     # 1) そのまま command に突っ込む（下位への観測用）
+    #     #    （自分のエンコード仕様に合わせて書き換えてOK）
+    #     self._command[:] = foot_targets_b
+
+    #     # 2) デバッグ用にワールド座標へ変換してキャッシュ
+    #     robot = self.env.scene.articulations["robot"]
+    #     base_pos_w = robot.data.root_state_w[:, 0:3]   # [B,3]
+    #     base_quat_w = robot.data.root_state_w[:, 3:7]  # [B,4]
+
+    #     # base -> world
+    #     # foot_targets_b: [B,4,3]
+        
+    #     # targets_w = quat_apply(base_quat_w.unsqueeze(1), foot_targets_b) \
+    #     #             + base_pos_w.unsqueeze(1)           # [B,4,3]
+
+    #     # # 各脚ごとにキャッシュ
+    #     # for leg_i, leg in enumerate(LEG_ORDER):
+    #     #     gp = targets_w[:, leg_i, :]        # [B,3]
+    #     #     # ここでは向きは「上向き」固定でOKなら単位クォータニオン
+    #     #     gq = torch.zeros(B, 4, device=self.device)
+    #     #     gq[:, 3] = 1.0
+
+    #     #     self._debug_goal_w_cache[leg] = gp
+    #     #     self._debug_goal_quat_cache[leg] = gq
+
+        
+    #     # [B,4,3] -> [B*4,3]
+    #     vec_b = foot_targets_b.reshape(B * len(LEG_ORDER), 3)
+    #     targets_w = foot_targets_b.reshape(B , len(LEG_ORDER), 3)
+
+
+    #     # [B,4] -> [B,1,4] -> [B,4,4] -> [B*4,4]
+    #     # quat_b = base_quat_w.unsqueeze(1).expand(-1, len(LEG_ORDER), -1)
+    #     # quat_b = quat_b.reshape(B * len(LEG_ORDER), 4)
+
+    #     # base -> world
+    #     # [B*4,3]
+    #     # vec_w = quat_apply(quat_b, vec_b)
+
+    #     # ベース位置を足して [B*4,3] -> [B,4,3]
+    #     # base_pos_rep = base_pos_w.unsqueeze(1).expand(-1, len(LEG_ORDER), -1)  # [B,4,3]
+    #     # targets_w = (vec_w.reshape(B, len(LEG_ORDER), 3) + base_pos_rep)       # [B,4,3]
+
+    #     # 各脚ごとにキャッシュ
+    #     for leg_i, leg in enumerate(LEG_ORDER):
+    #         gp = targets_w[:, leg_i, :]        # [B,3]
+    #         gq = torch.zeros(B, 4, device=self.device)
+    #         gq[:, 3] = 1.0                     # 向きはとりあえず単位 quat
+
+    #         self._debug_goal_w_cache[leg] = gp
+    #         self._debug_goal_quat_cache[leg] = gq
+
+
+
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         self._debug = debug_vis
@@ -1046,6 +1123,9 @@ class FootstepFromHighLevel(CommandTerm):
 
         for d in (self._goal_markers, self._foot_markers):
             for m in d.values(): m.set_visibility(True)
+
+
+
 
     def _debug_vis_callback(self, event):
         if not hasattr(self, "_goal_markers") or not self._goal_markers:
@@ -1226,7 +1306,7 @@ class MultiLegBaseCommand(CommandTerm):
         out = torch.zeros(B, 3 * len(LEG_ORDER), device=dev, dtype=base_p.dtype)
         for i, leg in enumerate(LEG_ORDER):
             out[:, 3*i:3*(i+1)] = leg_targets_b[leg]
-        self._command = out   # [B,12]
+        self._command = out   # [B,12]　ベース座標系でのコマンド
 
     # --------- デバッグ可視化設定 ---------
     def _set_debug_vis_impl(self, debug_vis: bool):
