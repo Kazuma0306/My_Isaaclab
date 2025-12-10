@@ -200,15 +200,21 @@ class _OnnxPolicyExporter(torch.nn.Module):
             else:
                 raise NotImplementedError(f"Unsupported RNN type: {self.rnn_type}")
         else:
-            obs = torch.zeros(1, self.actor[0].in_features)
+            if isinstance(self.actor, torch.nn.Sequential) and hasattr(self.actor[0], "in_features"):
+                in_features = self.actor[0].in_features
+            elif hasattr(self.actor, "input_dim"):
+                # ActorCritic.num_obs を使う（rsl_rl によくあるパターン）
+                in_features = self.actor.input_dim
+                # obs = torch.zeros(1, self.actor[0].in_features)
+            obs = torch.zeros(1, in_features)
             torch.onnx.export(
-                self,
-                obs,
-                os.path.join(path, filename),
-                export_params=True,
-                opset_version=11,
-                verbose=self.verbose,
-                input_names=["obs"],
-                output_names=["actions"],
-                dynamic_axes={},
+            self,
+            obs,
+            os.path.join(path, filename),
+            export_params=True,
+            opset_version=11,
+            verbose=self.verbose,
+            input_names=["obs"],
+            output_names=["actions"],
+            dynamic_axes={},
             )
