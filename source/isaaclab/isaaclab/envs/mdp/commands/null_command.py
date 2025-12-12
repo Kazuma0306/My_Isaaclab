@@ -723,7 +723,7 @@ class MultiLegBaseCommand3(CommandTerm):
 
         # ローカル [ux,uy] と高さオフセット
         self.block_local_offset_range: Tuple[float,float] = getattr(
-            cfg, "block_local_offset_range", (-0.00, 0.00)
+            cfg, "block_local_offset_range", (-0.05, 0.05)
         )
         self.block_top_offset: float = getattr(cfg, "block_top_offset", 0.15)
 
