@@ -2404,7 +2404,7 @@ class ManagerBasedEnv:
         # difficulty = 0.1   # カリキュラム等で決める [0,1]
 
 
-        # stone_xy_list = generate_xy_list_front_half(
+        # stone_xy_list = generate_xy_list_front_isaac(
         #     terrain_size_xy=(8.0, 8.0),
         #     horizontal_scale=0.05,
         #     stone_size_xy=(0.3, 0.3),
