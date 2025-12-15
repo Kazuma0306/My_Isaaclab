@@ -1851,6 +1851,128 @@ import types
 
 
 
+import numpy as np
+
+def quantize(v: float, h: float) -> float:
+    """horizontal_scale の格子に合わせて丸める"""
+    return round(v / h) * h
+
+def rects_intersect(ax0, ax1, ay0, ay1, bx0, bx1, by0, by1) -> bool:
+    return (ax0 < bx1) and (ax1 > bx0) and (ay0 < by1) and (ay1 > by0)
+
+
+
+def generate_xy_list_front_isaac(
+    terrain_size_xy=(8.0, 8.0),     # (Lx, Ly) [m] そのタイルの大きさ
+    horizontal_scale=0.05,          # [m] Terrain HF と揃えたい格子
+    stone_size_xy=(0.35, 0.25),     # (sx, sy) [m] ブロック天板サイズ（XY）
+    gap_xy=(0.15, 0.15),            # (gx, gy) [m] ブロック間ギャップ
+    platform_size=1.2,              # 中央台の一辺 [m]（正方形を仮定）
+    platform_center=(0.0, 0.0),     # 台中心（普通は (0,0)）
+    x_front_ratio=0.5,              # 前半のみ = 0.5（x>0 側）
+    margin=0.10,                    # 端からの余白 [m]
+    clearance=0.02,                 # 台との追加クリアランス [m]
+    per_row_phase=True,             # 行ごとに位相ずらし（stepping-stones風）
+    jitter_xy=(0.0, 0.0),           # (jx, jy) [m] 追加ランダム
+    seed=0,
+):
+    rng = np.random.default_rng(seed)
+
+    Lx, Ly = terrain_size_xy
+    sx, sy = stone_size_xy
+    gx, gy = gap_xy
+    jx, jy = jitter_xy
+
+    # ピッチ（中心間距離）
+    px = sx + gx
+    py = sy + gy
+
+    # 台（platform）のAABB
+    pcx, pcy = platform_center
+    half_p = platform_size * 0.5
+    plat_x0 = pcx - half_p - clearance
+    plat_x1 = pcx + half_p + clearance
+    plat_y0 = pcy - half_p - clearance
+    plat_y1 = pcy + half_p + clearance
+
+    # 配置領域（中心座標で安全に収まる範囲）
+    x_min = 0.0 + margin + sx * 0.5
+    x_max = (Lx * x_front_ratio) - margin - sx * 0.5  # x>0 側だけ使う想定（原点が中心なら Lx/2 が前端）
+    y_min = -Ly * 0.5 + margin + sy * 0.5
+    y_max = +Ly * 0.5 - margin - sy * 0.5
+
+    # 格子に量子化（HFと揃えるなら推奨）
+    x_min = quantize(x_min, horizontal_scale)
+    x_max = quantize(x_max, horizontal_scale)
+    y_min = quantize(y_min, horizontal_scale)
+    y_max = quantize(y_max, horizontal_scale)
+    px_q  = max(horizontal_scale, quantize(px, horizontal_scale))
+    py_q  = max(horizontal_scale, quantize(py, horizontal_scale))
+
+    points = []
+
+    # y の帯（row）を走査
+    y = y_min
+    row = 0
+    while y <= y_max + 1e-9:
+        # 行ごとに x の開始位相をずらす（完全格子にしたいなら 0 に固定）
+        phase = rng.uniform(0.0, sx) if per_row_phase else 0.0
+        x = x_min + quantize(phase, horizontal_scale)
+
+        while x <= x_max + 1e-9:
+            # ジッター（必要なら）
+            xx = x + (rng.uniform(-jx, jx) if jx > 0 else 0.0)
+            yy = y + (rng.uniform(-jy, jy) if jy > 0 else 0.0)
+
+            # 格子に戻す（HFと揃える）
+            xx = quantize(xx, horizontal_scale)
+            yy = quantize(yy, horizontal_scale)
+
+            # 石のAABB（中心から）
+            stone_x0 = xx - sx * 0.5
+            stone_x1 = xx + sx * 0.5
+            stone_y0 = yy - sy * 0.5
+            stone_y1 = yy + sy * 0.5
+
+            # 中央台と交差する石は除外
+            if not rects_intersect(stone_x0, stone_x1, stone_y0, stone_y1,
+                                   plat_x0, plat_x1, plat_y0, plat_y1):
+                points.append((xx, yy))
+
+            x += px_q
+
+        y += py_q
+        row += 1
+
+    return np.asarray(points, dtype=np.float32)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2252,6 +2374,9 @@ class ManagerBasedEnv:
         # # for proposed terrain
         # self.stones = self.scene.rigid_object_collections["stones"]
 
+
+
+
         # STONE_W, STONE_H, GAP= 0.2, 0.3, 0.004
 
         # # STONE_W = 0.3       # 0.3 x 0.3 のブロック
@@ -2278,7 +2403,20 @@ class ManagerBasedEnv:
                 
         # difficulty = 0.1   # カリキュラム等で決める [0,1]
 
-        # stone_xy_list = generate_ring_xy_isaac(difficulty)
+
+        # stone_xy_list = generate_xy_list_front_half(
+        #     terrain_size_xy=(8.0, 8.0),
+        #     horizontal_scale=0.05,
+        #     stone_size_xy=(0.3, 0.3),
+        #     gap_xy=(0.1, 0.1),
+        #     platform_size=1.0,
+        #     x_front_ratio=0.5,     # 前半（x>0 側）だけ
+        #     margin=0.10,
+        #     clearance=0.0,
+        #     per_row_phase=False,
+        #     # seed=42,
+        # )
+
 
 
 
@@ -2298,6 +2436,9 @@ class ManagerBasedEnv:
         # for i, name in enumerate(robot.joint_names):
         #     print(f"Index {i:02d}: {name}")
         # print("========================================")
+
+
+
 
         # reset_stones_ring(
         #     self,
@@ -2444,61 +2585,61 @@ class ManagerBasedEnv:
         return [(float(x), float(y)) for x, y in zip(xs_flat, ys_flat)]
 
     
-    def make_ring_xy5(self, stone_w, inner_half, outer_half, gap=1e-4, margin=1e-3, y_limit=1.55):
-        """
-        - stone_w: ブロックの一辺
-        - inner_half: 中央台の半サイズ（ここでは 0.5）
-        - outer_half: 外側の半径（どこまで石を敷き詰めるか）
-        - gap: ブロック同士の間隔（ほぼ 0）
-        - margin: 台の縁からブロックまでのすき間（ほぼ 0）
-        """
-        pitch = stone_w + gap
-        half_w = stone_w / 2.0
+    # def make_ring_xy5(self, stone_w, inner_half, outer_half, gap=1e-4, margin=1e-3, y_limit=1.55):
+    #     """
+    #     - stone_w: ブロックの一辺
+    #     - inner_half: 中央台の半サイズ（ここでは 0.5）
+    #     - outer_half: 外側の半径（どこまで石を敷き詰めるか）
+    #     - gap: ブロック同士の間隔（ほぼ 0）
+    #     - margin: 台の縁からブロックまでのすき間（ほぼ 0）
+    #     """
+    #     pitch = stone_w + gap
+    #     half_w = stone_w / 2.0
 
-        # 台の縁 (inner_half) から見て
-        # 「ブロック内側の縁」がほぼ接する位置にブロック中心を置きたい：
-        #   inner_edge ≒ inner_half + margin
-        #   center = inner_edge + half_w
-        # => r0: 最初のリングの中心半径
-        r0 = inner_half + margin + half_w  # 0.5 + margin + 0.15 ≒ 0.65
+    #     # 台の縁 (inner_half) から見て
+    #     # 「ブロック内側の縁」がほぼ接する位置にブロック中心を置きたい：
+    #     #   inner_edge ≒ inner_half + margin
+    #     #   center = inner_edge + half_w
+    #     # => r0: 最初のリングの中心半径
+    #     r0 = inner_half + margin + half_w  # 0.5 + margin + 0.15 ≒ 0.65
 
-        # 正の側の中心座標を r0 から pitch 間隔で生成
-        # ブロックの外側までが outer_half を越えない範囲で。
-        max_center = outer_half - half_w
-        if r0 > max_center:
-            return []
+    #     # 正の側の中心座標を r0 から pitch 間隔で生成
+    #     # ブロックの外側までが outer_half を越えない範囲で。
+    #     max_center = outer_half - half_w
+    #     if r0 > max_center:
+    #         return []
 
-        coords_pos = np.arange(r0, max_center + 1e-6, pitch)
-        coords_neg = -coords_pos[::-1]  # 原点対称に
+    #     coords_pos = np.arange(r0, max_center + 1e-6, pitch)
+    #     coords_neg = -coords_pos[::-1]  # 原点対称に
 
-        if coords_pos.size == 0:
-            return []
+    #     if coords_pos.size == 0:
+    #         return []
 
-        xs = np.concatenate((coords_neg, coords_pos))
-        ys = np.concatenate((coords_neg, coords_pos))
+    #     xs = np.concatenate((coords_neg, coords_pos))
+    #     ys = np.concatenate((coords_neg, coords_pos))
 
-        xs_grid, ys_grid = np.meshgrid(xs, ys, indexing="xy")
+    #     xs_grid, ys_grid = np.meshgrid(xs, ys, indexing="xy")
 
-        # L∞ノルム（チェビシェフ距離）でリング帯を取る
-        max_dist_center = np.maximum(np.abs(xs_grid), np.abs(ys_grid))
+    #     # L∞ノルム（チェビシェフ距離）でリング帯を取る
+    #     max_dist_center = np.maximum(np.abs(xs_grid), np.abs(ys_grid))
 
-        # 中央台＋マージンより外側
-        m_inner = (max_dist_center >= r0 - half_w)   # だいたい inner_half + margin
+    #     # 中央台＋マージンより外側
+    #     m_inner = (max_dist_center >= r0 - half_w)   # だいたい inner_half + margin
 
-        # outer_half からはみ出さない
-        m_outer = (max_dist_center <= outer_half - half_w)
+    #     # outer_half からはみ出さない
+    #     m_outer = (max_dist_center <= outer_half - half_w)
 
-        # 前方（+x）側だけ使うなら：
-        m_positive_x = (xs_grid - half_w > 0.0)
+    #     # 前方（+x）側だけ使うなら：
+    #     m_positive_x = (xs_grid - half_w > 0.0)
 
-        # y 範囲制限（必要なら調整）
-        m_y_upper = (ys_grid + half_w < y_limit)
-        m_y_lower = (ys_grid - half_w > -y_limit)
+    #     # y 範囲制限（必要なら調整）
+    #     m_y_upper = (ys_grid + half_w < y_limit)
+    #     m_y_lower = (ys_grid - half_w > -y_limit)
 
-        m = m_inner & m_outer & m_positive_x & m_y_upper & m_y_lower
+    #     m = m_inner & m_outer & m_positive_x & m_y_upper & m_y_lower
 
-        xs_flat, ys_flat = xs_grid[m], ys_grid[m]
-        return [(float(x), float(y)) for x, y in zip(xs_flat, ys_flat)]
+    #     xs_flat, ys_flat = xs_grid[m], ys_grid[m]
+    #     return [(float(x), float(y)) for x, y in zip(xs_flat, ys_flat)]
 
 
     
