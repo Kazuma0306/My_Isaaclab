@@ -36,6 +36,193 @@ from isaaclab.sim import utils as sim_utils
 
 
 
+# 中央の台
+PLATFORM_SIZE = 1.0          # 1.0 x 1.0
+PLATFORM_HALF = PLATFORM_SIZE * 0.5
+
+# Go2 のサイズ感（大雑把）
+GO2_LENGTH = 0.70            # だいたい 70 cm
+GO2_WIDTH  = 0.31            # だいたい 31 cm
+
+# 石幅のレンジ [m]（例：簡単な時は 0.35、大変になると 0.22 まで細く）
+STONE_WIDTH_RANGE = (0.22, 0.35)     # (min, max)
+
+# 石同士のギャップのレンジ [m]（例：最初ほぼ 0、難しくなると ~0.3）
+STONE_GAP_RANGE   = (0.0, 0.30)      # (min, max)
+
+# リングの内側半径（台の縁+数 mm）
+INNER_MARGIN = 0.01                  # 台とのギャップほぼ 0
+INNER_HALF   = PLATFORM_HALF + INNER_MARGIN   # ≒ 0.51
+
+# リングの厚さ（どこまで外側に石を置くか）
+RING_WIDTH   = GO2_LENGTH *  2# 体長の8割くらい外に広げる
+OUTER_HALF   = INNER_HALF + RING_WIDTH
+OUTER_HALF   = 5
+
+
+Y_LIMIT      = 1.2                   # 左右にどこまで石を出すか
+STONE_H      = 0.30                  # 高さは一定
+
+
+
+def generate_stepping_stone_ring_xy(
+    stone_w: float,
+    inner_half: float,
+    outer_half: float,
+    gap: float = 1e-4,
+    margin: float = 1e-3,
+    y_limit: float = 1.5,
+    front_only: bool = True,
+):
+    """
+    - stone_w   : ブロック一辺
+    - inner_half: 中央台の半サイズ＋α (この内側には石を置かない)
+    - outer_half: リングの外側半径
+    - gap       : ブロック同士の隙間
+    - margin    : inner_half から石までの隙間（ほぼ0でOK）
+    - y_limit   : |y| <= y_limit の範囲だけ使う
+    - front_only: True なら +x 側だけ（ロボット前方だけ）石を置く
+    戻り値: [(x, y), ...]  （env原点基準のローカル座標）
+    """
+    pitch = stone_w + gap
+    half_w = stone_w * 0.5
+
+    # 台の縁 inner_half から margin だけ外側に、
+    # ブロックの内側がほぼ接するように中心半径 r0 を決める
+    #   inner_edge ≒ inner_half + margin
+    #   center    = inner_edge + half_w
+    r0 = inner_half + margin + half_w
+
+    max_center = outer_half - half_w
+    if r0 > max_center:
+        return []
+
+    # 正側の中心位置を r0 から pitch ごとに並べる
+    coords_pos = np.arange(r0, max_center + 1e-6, pitch)
+    if coords_pos.size == 0:
+        return []
+
+    coords_neg = -coords_pos[::-1]
+
+    xs = np.concatenate((coords_neg, coords_pos))
+    ys = np.concatenate((coords_neg, coords_pos))
+
+    xs_grid, ys_grid = np.meshgrid(xs, ys, indexing="xy")
+
+    # L∞ノルムでリング判定
+    max_dist_center = np.maximum(np.abs(xs_grid), np.abs(ys_grid))
+
+    m_inner = (max_dist_center >= r0 - half_w)   # 中央台＋margin から外側
+    m_outer = (max_dist_center <= outer_half - half_w)
+
+    # 前方だけにするかどうか
+    if front_only:
+        m_x = (xs_grid - half_w > 0.0)
+    else:
+        m_x = np.ones_like(xs_grid, dtype=bool)
+
+    # y 範囲制限
+    m_y_upper = (ys_grid + half_w < y_limit)
+    m_y_lower = (ys_grid - half_w > -y_limit)
+
+    m = m_inner & m_outer & m_x & m_y_upper & m_y_lower
+
+    xs_flat, ys_flat = xs_grid[m], ys_grid[m]
+    return [(float(x), float(y)) for x, y in zip(xs_flat, ys_flat)]
+
+
+
+def resolve_stone_params(difficulty: float):
+    """
+    IsaacLab公式 stepping_stones_terrain と同じ補間で
+    石幅とギャップを決める。
+    difficulty: 0.0(易) ～ 1.0(難)
+    """
+    d = float(np.clip(difficulty, 0.0, 1.0))
+
+    w_min, w_max = STONE_WIDTH_RANGE
+    g_min, g_max = STONE_GAP_RANGE
+
+    # stone_width = max - d*(max-min)
+    stone_w = w_max - d * (w_max - w_min)
+    # stone_distance = min + d*(max-min)
+    stone_gap = g_min + d * (g_max - g_min)
+
+    return stone_w, stone_gap
+
+
+
+
+def generate_ring_xy_isaac(
+    difficulty: float,
+    inner_half: float = INNER_HALF,
+    outer_half: float = OUTER_HALF,
+    y_limit: float = Y_LIMIT,
+    front_only: bool = True,
+):
+    """
+    IsaacLab公式と同じ difficulty 補間で
+    stone_w / gap を決めてリング座標を返す。
+    戻り値: [(x, y), ...] （env原点基準）
+    """
+    stone_w, stone_gap = resolve_stone_params(difficulty)
+    return generate_stepping_stone_ring_xy(
+        stone_w=stone_w,
+        inner_half=inner_half,
+        outer_half=outer_half,
+        gap=stone_gap,
+        margin=1e-4,      # 台との隙間ほぼ0
+        y_limit=y_limit,
+        front_only=front_only,
+    )
+
+
+
+
+def reset_stones_ring(
+    env,
+    env_ids: torch.Tensor,
+    stone_xy_local: torch.Tensor,
+    stone_z_local: float,
+    collection_name: str = "stones",
+):
+    """
+    env.scene.env_origins を足して、ローカル座標のリングを
+    各 env の world 座標に配置し直す。
+    """
+    device = env.device
+    stones = env.scene.rigid_object_collections[collection_name]
+
+    env_origins = env.scene.env_origins[env_ids]  # [N_env, 3]
+
+    n_env = env_ids.shape[0]
+    n_block = stone_xy_local.shape[0]
+
+    state = stones.data.object_state_w[env_ids].clone()
+    pos = state[..., 0:3]
+    quat = state[..., 3:7]
+    linv = state[..., 7:10]
+    angv = state[..., 10:13]
+
+    xy_local = stone_xy_local.to(device)   # [N_block, 2]
+    x_local = xy_local[:, 0]               # [N_block]
+    y_local = xy_local[:, 1]
+
+    x_origin = env_origins[:, 0:1]         # [N_env, 1]
+    y_origin = env_origins[:, 1:2]
+    z_origin = env_origins[:, 2:3]
+
+    pos[:, :, 0] = x_origin + x_local[None, :]
+    pos[:, :, 1] = y_origin + y_local[None, :]
+    pos[:, :, 2] = z_origin + stone_z_local
+
+    quat[:] = torch.tensor([0.0, 0.0, 0.0, 1.0], device=device)
+    linv.zero_()
+    angv.zero_()
+
+    stones.write_object_state_to_sim(object_state=state, env_ids=env_ids)
+
+
 # def add_breakable_spherical_joint4(stage, stone_path,
 #                                    break_force=200.0, break_torque=30.0, cone_limit_deg=8.0):
 #     if not stone_path or not stone_path.startswith("/"):
@@ -2066,8 +2253,39 @@ class ManagerBasedEnv:
         # self.stones = self.scene.rigid_object_collections["stones"]
 
         # STONE_W, STONE_H, GAP= 0.2, 0.3, 0.004
+
+        # # STONE_W = 0.3       # 0.3 x 0.3 のブロック
+        # # STONE_H = 0.3
+        # # GAP     = 0.01      # ピッチ = 0.31m → そこそこ詰めて並ぶ
+
+        # # CENTER_HALF = 0.5   # 中央の台の半分の大きさ
+        # # MARGIN      = 0.05  # 台の縁からブロックまでの隙間 (~5cm)
+
+        # # INNER_HALF  = CENTER_HALF + MARGIN  # = 0.55
+        # # OUTER_HALF  = 1.5   
         # stone_xy_list = self.make_ring_xy4(STONE_W, GAP, inner_half=0.7, outer_half=3.37)
+        # # stone_xy_list = self.make_ring_xy5(
+        # #     stone_w=STONE_W,
+        # #     inner_half=CENTER_HALF,
+        # #     outer_half=OUTER_HALF,
+        # #     gap=1e-4,     # ブロック同士のギャップ ≒ 0
+        # #     margin=1e-3,  # 台の縁とのギャップ ≒ 0
+        # # )
+
+
+
+
+                
+        # difficulty = 0.1   # カリキュラム等で決める [0,1]
+
+        # stone_xy_list = generate_ring_xy_isaac(difficulty)
+
+
+
         # self.xy_local = torch.tensor(stone_xy_list, dtype=torch.float32, device=self.scene.device)
+        # z0 = 0.3
+        # self.stone_z_local = z0 - STONE_H * 0.5
+
 
         # # ③ 全Env一括で初期配置
         # self._place_all_stones()
@@ -2081,44 +2299,26 @@ class ManagerBasedEnv:
         #     print(f"Index {i:02d}: {name}")
         # print("========================================")
 
-        
+        # reset_stones_ring(
+        #     self,
+        #     env_ids,
+        #     self.xy_local,
+        #     self.stone_z_local,
+        #     collection_name="stones",
+        # )
 
         
 
-       
+        
 
-
-
-
-
-
-
+    
 
         # env の個数を数える（/World/envs/env_XXX を列挙）
         
-        # num_envs = self.scene.num_envs
-        # env_origins_np = self.scene.env_origins
+        num_envs = self.scene.num_envs
+        env_origins_np = self.scene.env_origins
 
-
-
-        # for ei in range(num_envs):
-        #     # ★ この env 専用のオフセット (Gf.Vec3f) を準備
-        #     env_origin_vec_np = env_origins_np[ei]
-        #     env_origin_gf = Gf.Vec3f(float(env_origin_vec_np[0]),
-        #                             float(env_origin_vec_np[1]),
-        #                             float(env_origin_vec_np[2]))
-            
-        #     # 4. ★ wire_env_stones に、計算したオフセットを渡す
-        #     wire_env_stones(
-        #         env_index=ei,
-        #         env_origin_offset=env_origin_gf, # ★ 新しい引数を追加
-        #         env_ns_template="/World/envs/env_{env}",
-        #         stone_name_prefix="Stone_",
-        #         joints_root_rel="fragile/Joints"
-        #     )
-
-
-        #
+        # self._reset_stones(env_ids)
 
 
 
@@ -2242,6 +2442,115 @@ class ManagerBasedEnv:
         xs_flat, ys_flat = xs_grid[m], ys_grid[m]
         
         return [(float(x), float(y)) for x, y in zip(xs_flat, ys_flat)]
+
+    
+    def make_ring_xy5(self, stone_w, inner_half, outer_half, gap=1e-4, margin=1e-3, y_limit=1.55):
+        """
+        - stone_w: ブロックの一辺
+        - inner_half: 中央台の半サイズ（ここでは 0.5）
+        - outer_half: 外側の半径（どこまで石を敷き詰めるか）
+        - gap: ブロック同士の間隔（ほぼ 0）
+        - margin: 台の縁からブロックまでのすき間（ほぼ 0）
+        """
+        pitch = stone_w + gap
+        half_w = stone_w / 2.0
+
+        # 台の縁 (inner_half) から見て
+        # 「ブロック内側の縁」がほぼ接する位置にブロック中心を置きたい：
+        #   inner_edge ≒ inner_half + margin
+        #   center = inner_edge + half_w
+        # => r0: 最初のリングの中心半径
+        r0 = inner_half + margin + half_w  # 0.5 + margin + 0.15 ≒ 0.65
+
+        # 正の側の中心座標を r0 から pitch 間隔で生成
+        # ブロックの外側までが outer_half を越えない範囲で。
+        max_center = outer_half - half_w
+        if r0 > max_center:
+            return []
+
+        coords_pos = np.arange(r0, max_center + 1e-6, pitch)
+        coords_neg = -coords_pos[::-1]  # 原点対称に
+
+        if coords_pos.size == 0:
+            return []
+
+        xs = np.concatenate((coords_neg, coords_pos))
+        ys = np.concatenate((coords_neg, coords_pos))
+
+        xs_grid, ys_grid = np.meshgrid(xs, ys, indexing="xy")
+
+        # L∞ノルム（チェビシェフ距離）でリング帯を取る
+        max_dist_center = np.maximum(np.abs(xs_grid), np.abs(ys_grid))
+
+        # 中央台＋マージンより外側
+        m_inner = (max_dist_center >= r0 - half_w)   # だいたい inner_half + margin
+
+        # outer_half からはみ出さない
+        m_outer = (max_dist_center <= outer_half - half_w)
+
+        # 前方（+x）側だけ使うなら：
+        m_positive_x = (xs_grid - half_w > 0.0)
+
+        # y 範囲制限（必要なら調整）
+        m_y_upper = (ys_grid + half_w < y_limit)
+        m_y_lower = (ys_grid - half_w > -y_limit)
+
+        m = m_inner & m_outer & m_positive_x & m_y_upper & m_y_lower
+
+        xs_flat, ys_flat = xs_grid[m], ys_grid[m]
+        return [(float(x), float(y)) for x, y in zip(xs_flat, ys_flat)]
+
+
+    
+
+    def _reset_stones(self, env_ids: torch.Tensor):
+        """
+        各 env の原点 self.scene.env_origins を考慮して
+        リング状にブロックを配置する。
+        """
+        device = self.device
+        stones = self.scene.rigid_object_collections["stones"]
+
+        # env 原点 [N_env, 3]
+        env_origins = self.scene.env_origins[env_ids]  # [N_env, 3]
+
+        n_env = env_ids.shape[0]
+        n_block = self.xy_local.shape[0]
+
+        # 現在の状態 [N_env, N_block, 13] をコピー
+        state = stones.data.object_state_w[env_ids].clone()
+        pos = state[..., 0:3]
+        quat = state[..., 3:7]
+        linv = state[..., 7:10]
+        angv = state[..., 10:13]
+
+        # ローカル XY [N_block, 2]
+        xy_local = self.xy_local.to(device)  # 念のため device を合わせる
+        x_local = xy_local[:, 0]   # [N_block]
+        y_local = xy_local[:, 1]   # [N_block]
+
+        # ブロードキャストで env ごとの world 座標を作る
+        # env_origins: [N_env, 3]
+        # → x_origin: [N_env, 1], y_origin: [N_env, 1], z_origin: [N_env, 1]
+        x_origin = env_origins[:, 0:1]  # [N_env, 1]
+        y_origin = env_origins[:, 1:2]  # [N_env, 1]
+        z_origin = env_origins[:, 2:3]  # [N_env, 1]
+
+        # pos: [N_env, N_block, 3]
+        pos[:, :, 0] = x_origin + x_local[None, :]          # [N_env, N_block]
+        pos[:, :, 1] = y_origin + y_local[None, :]          # [N_env, N_block]
+        pos[:, :, 2] = z_origin + self.stone_z_local        # すべて同じ高さに置く
+
+        # 姿勢は水平・速度ゼロにリセット
+        quat[:] = torch.tensor([0.0, 0.0, 0.0, 1.0], device=device)
+        linv.zero_()
+        angv.zero_()
+
+        # まとめてシミュレータに書き込み
+        stones.write_object_state_to_sim(
+            object_state=state,
+            env_ids=env_ids,
+        )
 
 
     
