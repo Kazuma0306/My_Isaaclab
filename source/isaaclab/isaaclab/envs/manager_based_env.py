@@ -1861,6 +1861,12 @@ def rects_intersect(ax0, ax1, ay0, ay1, bx0, bx1, by0, by1) -> bool:
     return (ax0 < bx1) and (ax1 > bx0) and (ay0 < by1) and (ay1 > by0)
 
 
+def snap_up(v, h):   return np.ceil(v / h) * h
+def snap_down(v, h): return np.floor(v / h) * h
+def snap_near(v, h): return np.round(v / h) * h
+
+
+
 
 def generate_xy_list_front_isaac(
     terrain_size_xy=(8.0, 8.0),     # (Lx, Ly) [m] そのタイルの大きさ
@@ -1902,12 +1908,23 @@ def generate_xy_list_front_isaac(
     y_max = +Ly * 0.5 - margin - sy * 0.5
 
     # 格子に量子化（HFと揃えるなら推奨）
-    x_min = quantize(x_min, horizontal_scale)
-    x_max = quantize(x_max, horizontal_scale)
-    y_min = quantize(y_min, horizontal_scale)
-    y_max = quantize(y_max, horizontal_scale)
-    px_q  = max(horizontal_scale, quantize(px, horizontal_scale))
-    py_q  = max(horizontal_scale, quantize(py, horizontal_scale))
+    # x_min = quantize(x_min, horizontal_scale)
+    # x_max = quantize(x_max, horizontal_scale)
+    # y_min = quantize(y_min, horizontal_scale)
+    # y_max = quantize(y_max, horizontal_scale)
+
+    # スナップは min=ceil / max=floor
+    x_min = snap_up(x_min, horizontal_scale)
+    x_max = snap_down(x_max, horizontal_scale)
+    y_min = snap_up(y_min, horizontal_scale)
+    y_max = snap_down(y_max, horizontal_scale)
+
+
+    # px_q  = max(horizontal_scale, quantize(px, horizontal_scale))
+    # py_q  = max(horizontal_scale, quantize(py, horizontal_scale))
+
+    px_q = max(horizontal_scale, snap_near(px, horizontal_scale))
+    py_q = max(horizontal_scale, snap_near(py, horizontal_scale))
 
     points = []
 
@@ -1944,7 +1961,10 @@ def generate_xy_list_front_isaac(
         y += py_q
         row += 1
 
-    return np.asarray(points, dtype=np.float32)
+    # return np.asarray(points, dtype=np.float32)
+
+    return points
+
 
 
 
@@ -2372,7 +2392,7 @@ class ManagerBasedEnv:
        
 
         # # for proposed terrain
-        # self.stones = self.scene.rigid_object_collections["stones"]
+        self.stones = self.scene.rigid_object_collections["stones"]
 
 
 
@@ -2404,25 +2424,25 @@ class ManagerBasedEnv:
         # difficulty = 0.1   # カリキュラム等で決める [0,1]
 
 
-        # stone_xy_list = generate_xy_list_front_isaac(
-        #     terrain_size_xy=(8.0, 8.0),
-        #     horizontal_scale=0.05,
-        #     stone_size_xy=(0.3, 0.3),
-        #     gap_xy=(0.1, 0.1),
-        #     platform_size=1.0,
-        #     x_front_ratio=0.5,     # 前半（x>0 側）だけ
-        #     margin=0.10,
-        #     clearance=0.0,
-        #     per_row_phase=False,
-        #     # seed=42,
-        # )
+        stone_xy_list = generate_xy_list_front_isaac(
+            terrain_size_xy=(8.0, 8.0),
+            horizontal_scale=0.05,
+            stone_size_xy=(0.3, 0.3),
+            gap_xy=(0.1, 0.1),
+            platform_size=1.0,
+            x_front_ratio=0.5,     # 前半（x>0 側）だけ
+            margin=0.10,
+            clearance=0.0,
+            per_row_phase=False,
+            # seed=42,
+        )
 
 
 
 
-        # self.xy_local = torch.tensor(stone_xy_list, dtype=torch.float32, device=self.scene.device)
-        # z0 = 0.3
-        # self.stone_z_local = z0 - STONE_H * 0.5
+        self.xy_local = torch.tensor(stone_xy_list, dtype=torch.float32, device=self.scene.device)
+        z0 = 0.3
+        self.stone_z_local = z0 - STONE_H * 0.5
 
 
         # # ③ 全Env一括で初期配置
@@ -2440,13 +2460,13 @@ class ManagerBasedEnv:
 
 
 
-        # reset_stones_ring(
-        #     self,
-        #     env_ids,
-        #     self.xy_local,
-        #     self.stone_z_local,
-        #     collection_name="stones",
-        # )
+        reset_stones_ring(
+            self,
+            env_ids,
+            self.xy_local,
+            self.stone_z_local,
+            collection_name="stones",
+        )
 
         
 
