@@ -1000,13 +1000,13 @@ def block_terrain(difficulty: float, cfg: MeshBlockTerrainCfg):
     # meshes_list.append(platform)
 
     # 3) 外周リング（天面 z = 0、中央台の周囲を囲う）
-    ring_parts = make_rect_frame(
-        outer_xy=(Lx, Ly),
-        hole_xy=inner_hole,          # 穴 = （中央台 + 堀幅×2）
-        z_top=0.0,
-        thickness=cfg.ring_thickness
-    )
-    meshes_list += ring_parts
+    # ring_parts = make_rect_frame(
+    #     outer_xy=(Lx, Ly),
+    #     hole_xy=inner_hole,          # 穴 = （中央台 + 堀幅×2）
+    #     z_top=0.0,
+    #     thickness=cfg.ring_thickness
+    # )
+    # meshes_list += ring_parts
 
     # 4) 原点（地形の幾何中心をXY原点にし、Z=0が“歩行面”）
     origin = np.array([Lx / 2.0, Ly / 2.0, 0.0], dtype=float)

@@ -298,9 +298,9 @@ class MeshMoatTerrainCfg(SubTerrainBaseCfg):
 
     function = mesh_terrains.moat_terrain
 
-    platform_width = 1.95        # 1.5 m × 1.5 m
+    platform_width = 1     # 1.5 m × 1.5 m
     # 堀の“幅”（中央台の外周から外側地面までの距離）
-    moat_width = 2.7                  # 例: 1.0 m（お好みで調整）
+    moat_width = 3.3                 # 例: 1.0 m（お好みで調整）
     # 落差（m）
     moat_depth = 0.3                 # 指定どおり 0.30 m
     # メッシュの厚み（実体化用のZ厚さ）

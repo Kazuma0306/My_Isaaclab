@@ -465,6 +465,27 @@ class MultiLegBaseCommand3Cfg(CommandTermCfg):
         "RR_foot": "stone6",  # ★右後: 右前が居た場所へ移動！
     },
 
+      "9": {
+        "FL_foot": "stone9",
+        "FR_foot": "stone10",  
+        "RL_foot": "stone5",
+        "RR_foot": "stone4",  
+    },
+
+    "10": {
+        "FL_foot": "stone1",
+        "FR_foot": "stone10",  # 右前: 既に移動済み
+        "RL_foot": "stone5",
+        "RR_foot": "stone4",  # ★右後: 右前が居た場所へ移動！
+    },
+
+    "11": {
+        "FL_foot": "stone1",
+        "FR_foot": "stone10",  # 右前: 既に移動済み
+        "RL_foot": "stone5",
+        "RR_foot": "stone3",  # ★右後: 右前が居た場所へ移動！
+    },
+
 
     }
 )
