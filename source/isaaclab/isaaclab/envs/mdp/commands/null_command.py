@@ -1406,3 +1406,347 @@ class MultiLegBaseCommand(CommandTerm):
             fp, fq = _foot_pose_w(leg)  # [B,3], [B,4]
             self._goal_markers[leg].visualize(gp, gq)
             self._foot_markers[leg].visualize(fp, fq)
+
+
+
+
+
+
+class MultiLegBaseCommandEval(CommandTerm):
+
+    def __init__(self, cfg, env):
+        super().__init__(cfg, env)
+        self.env = env
+        B, dev = self.num_envs, self.device
+
+        # 出力コマンド [B, 12] = [FL(3), FR(3), RL(3), RR(3)]
+        self._command = torch.zeros(B, 3 * len(LEG_ORDER), device=dev)
+
+        # 各脚ごとのローカルオフセット（矩形内をランダムサンプルして保持）
+        #   _ped_local[leg]: [B,2]  (中心 center_xy からのオフセット)
+        self._ped_local: Dict[str, torch.Tensor] = {
+            leg: torch.zeros(B, 2, device=dev) for leg in LEG_ORDER
+        }
+
+        # ---- 設定 ----
+        # 例:
+        # ped_areas = {
+        #   "FL_foot": {"center_xy": (0.25,  0.15), "half": (0.06,0.06), "top_z": 0.01},
+        #   "FR_foot": {"center_xy": (0.25, -0.15), "half": (0.06,0.06), "top_z": 0.01},
+        #   "RL_foot": {"center_xy": (-0.15,  0.15), "half": (0.06,0.06), "top_z": 0.01},
+        #   "RR_foot": {"center_xy": (-0.15, -0.15), "half": (0.06,0.06), "top_z": 0.01},
+        # }
+        default_ped_areas = {
+            "FL_foot": {"center_xy": (0.25,  0.15), "half": (0.1, 0.1), "top_z": 0.01},
+            "FR_foot": {"center_xy": (0.25, -0.15), "half": (0.1, 0.1), "top_z": 0.01},
+            "RL_foot": {"center_xy": (-0.15,  0.15), "half": (0.1, 0.1), "top_z": 0.01},
+            "RR_foot": {"center_xy": (-0.15, -0.15), "half": (0.1, 0.1), "top_z": 0.01},
+        }
+        self.ped_areas: Dict[str, Dict] = getattr(cfg, "ped_areas", default_ped_areas)
+
+        # 地形高さ関数を使いたい場合は (B,2)->(B,) を与える
+        # 例: cfg.height_fn を別でセットしておき、ここで getattr で取る
+        self.height_fn = getattr(cfg, "height_fn", None)
+
+        # デバッグ可視化用
+        self._goal_markers: Dict[str, VisualizationMarkers] = {}
+        self._foot_markers: Dict[str, VisualizationMarkers] = {}
+
+
+        # for evaluation
+        self.eval_single_leg = getattr(cfg, "eval_single_leg", True)
+        self.moving_leg = getattr(cfg, "moving_leg", "FR_foot")
+        self.fixed_mode = getattr(cfg, "fixed_mode", "hold_current")
+
+
+        self.eval_sampler = getattr(cfg, "eval_sampler", "sobol")   # "grid" | "sobol" | "lhs"
+        self.eval_seed = int(getattr(cfg, "eval_seed", 0))
+
+        self._eval_points = {}  # leg -> [B,2]
+        for li, leg in enumerate(LEG_ORDER):
+            half = self.ped_areas[leg]["half"]
+            self._eval_points[leg] = self._make_points(self.num_envs, half, seed=self.eval_seed + 97*li)
+
+
+        # 初回サンプル
+        self._resample_command(range(B))
+
+
+    # --- 必須: 実装フック ---
+    def _update_metrics(self):
+        # 必要ならここでログを更新
+        pass
+
+    @property
+    def command(self) -> torch.Tensor:
+        return self._command
+
+    # --------- サンプリング関数 ---------
+    def _sample_rect(self, n: int, half_xy: Tuple[float, float]):
+        """
+        中心 (0,0)、半径 half_xy = (half_x, half_y) の矩形
+        [-half_x, half_x] x [-half_y, half_y] 内を一様サンプル
+        """
+        hx, hy = half_xy
+        x = torch.empty(n, device=self.device).uniform_(-hx, hx)
+        y = torch.empty(n, device=self.device).uniform_(-hy, hy)
+        return torch.stack([x, y], -1)  # [n,2]
+
+    
+    def _make_points(self, B: int, half_xy, seed: int):
+        hx, hy = half_xy
+        dev = self.device
+
+        if self.eval_sampler == "sobol":
+            # Sobol: [0,1] -> [-1,1] -> scale
+            eng = torch.quasirandom.SobolEngine(dimension=2, scramble=True, seed=seed)
+            u = eng.draw(B).to(device=dev)               # [B,2] in [0,1]
+            pts = (u * 2.0 - 1.0) * torch.tensor([hx, hy], device=dev)
+            return pts
+
+        if self.eval_sampler == "lhs":
+            # LHS: 各次元で層化 + permutation
+            g = torch.Generator(device=dev)
+            g.manual_seed(seed)
+            # bins
+            base = torch.arange(B, device=dev, dtype=torch.float32)
+            u = (base + torch.rand(B, device=dev, generator=g)) / float(B)   # [B] in (0,1)
+            v = (base + torch.rand(B, device=dev, generator=g)) / float(B)
+            u = u[torch.randperm(B, device=dev, generator=g)]
+            v = v[torch.randperm(B, device=dev, generator=g)]
+            pts01 = torch.stack([u, v], dim=-1)
+            pts = (pts01 * 2.0 - 1.0) * torch.tensor([hx, hy], device=dev)
+            return pts
+
+        if self.eval_sampler == "grid":
+            # 格子: なるべく正方に近い nx*ny>=B を作って先頭B点を使う
+            nx = int((B ** 0.5))
+            ny = (B + nx - 1) // nx
+            xs = torch.linspace(-hx, hx, steps=nx, device=dev)
+            ys = torch.linspace(-hy, hy, steps=ny, device=dev)
+            X, Y = torch.meshgrid(xs, ys, indexing="ij")
+            pts = torch.stack([X.reshape(-1), Y.reshape(-1)], dim=-1)[:B]
+            return pts
+
+        raise ValueError(f"Unknown eval_sampler: {self.eval_sampler}")
+
+
+
+    # # --------- コマンド再サンプル ---------
+    # def _resample_command(self, env_ids=None):
+    #     """
+    #     env_ids:
+    #     - None -> 全env
+    #     - list / range / torch.Tensor → long tensor に変換
+    #     """
+    #     dev = self.device
+
+    #     if env_ids is None:
+    #         env_ids = torch.arange(self.num_envs, device=dev, dtype=torch.long)
+    #     else:
+    #         if not isinstance(env_ids, torch.Tensor):
+    #             env_ids = torch.as_tensor(env_ids, device=dev, dtype=torch.long)
+
+    #     # # 4脚すべてについて、指定矩形の中でランダムサンプル
+    #     # for leg in LEG_ORDER:
+    #     #     spec = self.ped_areas[leg]
+    #     #     half = spec["half"]  # (half_x, half_y)
+    #     #     self._ped_local[leg][env_ids] = self._sample_rect(env_ids.numel(), half)
+
+    #     # # サンプルした値を使ってコマンド更新
+    #     # self._update_command()
+
+    #     # # メトリクス（任意）
+    #     # self.metrics.setdefault("resample_count", torch.zeros(self.num_envs, device=dev))
+    #     # self.metrics["resample_count"][env_ids] += 1.0
+
+
+    #     for leg in LEG_ORDER:
+    #         if (not self.eval_single_leg) or (leg == self.moving_leg):
+    #             spec = self.ped_areas[leg]
+    #             self._ped_local[leg][env_ids] = self._sample_rect(env_ids.numel(), spec["half"])
+    #         else:
+    #             if self.fixed_mode == "nominal":
+    #                 self._ped_local[leg][env_ids] = 0.0  # center_xy に固定
+    #             # hold_current の場合はここでは何もしない（update側で読む）
+
+
+
+    #     self._update_command()
+
+
+    
+    def _resample_command(self, env_ids=None):
+        dev = self.device
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, device=dev, dtype=torch.long)
+        else:
+            if not isinstance(env_ids, torch.Tensor):
+                env_ids = torch.as_tensor(env_ids, device=dev, dtype=torch.long)
+
+        for leg in LEG_ORDER:
+            if (not self.eval_single_leg) or (leg == self.moving_leg):
+                # ★ここ：乱数ではなく “固定テーブル” を入れる
+                self._ped_local[leg][env_ids] = self._eval_points[leg][env_ids]
+            else:
+                if self.fixed_mode == "nominal":
+                    self._ped_local[leg][env_ids] = 0.0  # center_xyに固定
+                # hold_current は update_command 側で現在足位置を読む
+
+        self._update_command()
+
+
+
+    # --------- world→base 変換を含むコマンド更新 ---------
+    def _update_command(self):
+        B, dev = self.num_envs, self.device
+        scene = self.env.scene
+
+        # ベース姿勢 (world)
+        robot = scene.articulations["robot"]
+        base_p = robot.data.root_pos_w      # [B,3]
+        base_q = robot.data.root_quat_w     # [B,4] (wxyz)
+        R_wb3  = _rot3_from_quat_wxyz(base_q).transpose(-1, -2)  # world->base [B,3,3]
+
+        # env 原点 (ワールド座標; IsaacLab で env ごとにずらす時用)
+        origins = getattr(scene, "env_origins", torch.zeros(B,3, device=dev))
+        o_xy = origins[...,:2]  # [B,2]
+
+        leg_targets_b: Dict[str, torch.Tensor] = {}
+
+
+        # 足の world pos を取る（Hold-current 用）
+        # [B, num_bodies, 3]
+        body_pos_w = robot.data.body_pos_w
+
+        for leg in LEG_ORDER:
+            if self.eval_single_leg and (leg != self.moving_leg) and (self.fixed_mode == "hold_current"):
+                foot_id = robot.body_names.index(leg)
+                t_w = body_pos_w[:, foot_id, :]  # 現在の足位置をそのまま目標に
+            else:
+                spec = self.ped_areas[leg]
+                center_xy = torch.as_tensor(
+                    spec["center_xy"], device=dev, dtype=base_p.dtype
+                )  # [2]
+
+                # env原点 + 指定中心 + ランダムオフセット
+                ctr = o_xy + center_xy                 # [B,2]
+                off = self._ped_local[leg]            # [B,2] (矩形内ランダム)
+                t_xy_w = ctr + off                    # [B,2]
+
+                # 高さ
+                if self.height_fn is not None:
+                    t_z_w = self.height_fn(t_xy_w)                     # [B,]
+                else:
+                    t_z_w = torch.full(
+                        (B,), float(spec.get("top_z", 0.0)),
+                        device=dev, dtype=base_p.dtype
+                    )
+
+                # world 座標 [B,3]
+                t_w = torch.cat([t_xy_w, t_z_w.unsqueeze(-1)], -1)
+
+            # base 座標へ変換: (R_wb3 @ (t_w - base_p))
+            leg_targets_b[leg] = (R_wb3 @ (t_w - base_p).unsqueeze(-1)).squeeze(-1)
+
+        # 出力（FL,FR,RL,RR の順番）
+        out = torch.zeros(B, 3 * len(LEG_ORDER), device=dev, dtype=base_p.dtype)
+        for i, leg in enumerate(LEG_ORDER):
+            out[:, 3*i:3*(i+1)] = leg_targets_b[leg]
+        self._command = out   # [B,12]　ベース座標系でのコマンド
+
+    # --------- デバッグ可視化設定 ---------
+    def _set_debug_vis_impl(self, debug_vis: bool):
+        self._debug = debug_vis
+
+        # 親 __init__ から呼ばれたときでも安全なように、必ず dict を持たせる
+        if not hasattr(self, "_goal_markers"):
+            self._goal_markers: Dict[str, VisualizationMarkers] = {}
+        if not hasattr(self, "_foot_markers"):
+            self._foot_markers: Dict[str, VisualizationMarkers] = {}
+
+        # 可視化 OFF → あるものは全部非表示にして終了
+        if not debug_vis:
+            for d in (self._goal_markers, self._foot_markers):
+                for m in d.values():
+                    m.set_visibility(False)
+            return
+
+        # 可視化 ON → 全ての脚について marker を「存在させる」
+        for leg in LEG_ORDER:
+            if leg not in self._goal_markers:
+                self._goal_markers[leg] = VisualizationMarkers(
+                    self.cfg.goal_pose_visualizer_cfg
+                )
+            if leg not in self._foot_markers:
+                self._foot_markers[leg] = VisualizationMarkers(
+                    self.cfg.feet_pose_visualizer_cfg
+                )
+
+        # ON にしたタイミングで全部可視化
+        for d in (self._goal_markers, self._foot_markers):
+            for m in d.values():
+                m.set_visibility(True)
+
+    # --------- デバッグ可視化コールバック ---------
+    def _debug_vis_callback(self, event):
+        # markers がまだなければここで必ず作る
+        if not hasattr(self, "_goal_markers") or not self._goal_markers:
+            self._set_debug_vis_impl(True)
+
+        robot = self.env.scene.articulations["robot"]
+        if not robot.is_initialized:
+            return
+
+        B, dev = self.num_envs, self.device
+
+        # env 原点
+        origins = getattr(self.env.scene, "env_origins", torch.zeros(B,3, device=dev))
+        o_xy = origins[...,:2]  # [B,2]
+
+        # 4脚の目標姿勢 (world)
+        goal_w: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {}
+        for leg in LEG_ORDER:
+            spec = self.ped_areas[leg]
+            center_xy = torch.as_tensor(
+                spec["center_xy"], device=dev, dtype=origins.dtype
+            )      # [2]
+            off = self._ped_local[leg]            # [B,2]
+            t_xy_w = o_xy + center_xy + off       # [B,2]
+
+            if self.height_fn is not None:
+                t_z_w = self.height_fn(t_xy_w)
+            else:
+                t_z_w = torch.full(
+                    (B,), float(spec.get("top_z", 0.0)),
+                    device=dev, dtype=origins.dtype
+                )
+
+            pos = torch.cat([t_xy_w, t_z_w.unsqueeze(-1)], -1)   # [B,3]
+            # 向きはとりあえず無回転
+            quat = torch.tensor(
+                [1.0, 0.0, 0.0, 0.0],
+                device=dev, dtype=origins.dtype
+            ).expand(B, 4)
+            goal_w[leg] = (pos, quat)
+
+        # 足先 現在値 (world)
+        def _foot_pose_w(leg_name):
+            idx = robot.body_names.index(leg_name)
+            if hasattr(robot.data, "body_link_pose_w"):
+                pose = robot.data.body_link_pose_w[:, idx]  # [B,7]
+                return pose[:, :3], pose[:, 3:7]
+            else:
+                pos = robot.data.body_pos_w[:, idx, :3]
+                quat = getattr(
+                    robot.data, "body_quat_w",
+                    getattr(robot.data, "body_orient_w")
+                )[:, idx, :4]
+                return pos, quat
+
+        # 描画
+        for leg in LEG_ORDER:
+            gp, gq = goal_w[leg]        # [B,3], [B,4]
+            fp, fq = _foot_pose_w(leg)  # [B,3], [B,4]
+            self._goal_markers[leg].visualize(gp, gq)
+            self._foot_markers[leg].visualize(fp, fq)

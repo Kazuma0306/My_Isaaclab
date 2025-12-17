@@ -16,9 +16,10 @@ from .commands_cfg import (
     MultiLegBaseCommandCfg, 
     MultiLegBaseCommand2Cfg,
     MultiLegBaseCommand3Cfg,
-    FootstepFromHighLevelCfg
+    FootstepFromHighLevelCfg,
+    MultiLegBaseCommandEvalCfg
 )
-from .null_command import NullCommand, MultiLegBaseCommand, MultiLegBaseCommand2, MultiLegBaseCommand3, FootstepFromHighLevel
+from .null_command import NullCommand, MultiLegBaseCommand, MultiLegBaseCommand2, MultiLegBaseCommand3, FootstepFromHighLevel, MultiLegBaseCommandEval
 from .pose_2d_command import TerrainBasedPose2dCommand, UniformPose2dCommand
 from .pose_command import UniformPoseCommand
 from .velocity_command import NormalVelocityCommand, UniformVelocityCommand
