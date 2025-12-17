@@ -2283,6 +2283,7 @@ def stepping_stones_xy_front_half_pixelwise2(
                     "n_cols": int(n_cols),
                     "x0_start_px": int(x0_start),
                     "outer_slack_px": int(outer_slack_px),
+                    "dist_px": int(dist_px),
                     "platform_gap_px": int(platform_gap_px),
                 }
 
@@ -2294,6 +2295,7 @@ def stepping_stones_xy_front_half_pixelwise2(
         "produced": int(len(xy)),
         "x0_start_px": int(x0_start),
         "outer_slack_px": int(outer_slack_px),
+        "dist_px": int(dist_px),
         "platform_gap_px": int(platform_gap_px),
     }
 
@@ -2513,16 +2515,16 @@ class ManagerBasedEnv:
         # num_levels = int(self.scene.terrain.terrain_levels.max().item() + 1)
         # num_levels = int(env.scene.terrain.cfg.num_levels)  # 例
 
-        num_levels =10
-        self.num_patterns = 1
-        # self.num_stones = 128
-        self.stone_w_m = 0.25
+        # num_levels =10
+        # self.num_patterns = 1
+        # # self.num_stones = 128
+        # self.stone_w_m = 0.25
 
         self._build_xy_bank(
-            num_levels=num_levels,
-            num_patterns=self.num_patterns,
-            # num_stones=self.num_stones,
-            stone_w_m=self.stone_w_m,
+            # num_levels=num_levels,
+            # num_patterns=self.num_patterns,
+            # # num_stones=self.num_stones,
+            # stone_w_m=self.stone_w_m,
         )
 
 
@@ -2729,7 +2731,7 @@ class ManagerBasedEnv:
         #changed
 
         # # for proposed terrain
-        self.stones = self.scene.rigid_object_collections["stones"]
+        # self.stones = self.scene.rigid_object_collections["stones"]
 
 
 
@@ -2806,25 +2808,26 @@ class ManagerBasedEnv:
         # )
 
 
-        stone_xy_list, meta = stepping_stones_xy_front_half_pixelwise(
-            size_x_m=8.0,
-            size_y_m=8.0,
-            horizontal_scale=0.02,
-            platform_width_m=1.0,
-            difficulty=1,
-            stone_width_range_m=(0.25, 0.25),
-            stone_distance_range_m=(0.02, 0.05),
-            margin_m=0.2,
-            outer_slack_m = 0.2,
-            platform_clearance_m=0.0,   # まずは 0 推奨（避けすぎを防ぐ）
-            per_row_phase=False,
-            # seed=123,
-            max_points=None,            # num_stonesに合わせるなら apply 側で切る/退避が安全
-        )
+        # stone_xy_list, meta = stepping_stones_xy_front_half_pixelwise(
+        #     size_x_m=8.0,
+        #     size_y_m=8.0,
+        #     horizontal_scale=0.02,
+        #     platform_width_m=1.0,
+        #     difficulty=1,
+        #     stone_width_range_m=(0.25, 0.25),
+        #     stone_distance_range_m=(0.05, 0.05),
+        #     margin_m=0.2,
+        #     outer_slack_m = 0.4,
+        #     platform_clearance_m=0.0,   # まずは 0 推奨（避けすぎを防ぐ）
+        #     per_row_phase=False,
+        #     # seed=123,
+        #     max_points=None,            # num_stonesに合わせるなら apply 側で切る/退避が安全
+        # )
 
 
+        self.stones = self.scene.rigid_object_collections["stones"]
 
-        self.xy_local = torch.tensor(stone_xy_list, dtype=torch.float32, device=self.scene.device)
+        # self.xy_local = torch.tensor(stone_xy_list, dtype=torch.float32, device=self.scene.device)
         z0 = 0.3
         self.stone_z_local = z0 - STONE_H * 0.5
 
@@ -2844,15 +2847,18 @@ class ManagerBasedEnv:
 
 
 
-        reset_stones_ring(
-            self,
-            env_ids,
-            self.xy_local,
-            self.stone_z_local,
-            collection_name="stones",
-        )
+        # reset_stones_ring(
+        #     self,
+        #     env_ids,
+        #     self.xy_local,
+        #     self.stone_z_local,
+        #     collection_name="stones",
+        # )
 
-        # self.reset_stones_by_terrain_level(env_ids, self.num_patterns)
+        self.reset_stones_by_terrain_level(env_ids)
+
+
+
 
         
 
@@ -3154,16 +3160,18 @@ class ManagerBasedEnv:
     
 
     def _build_xy_bank(self,
-                   num_levels: int,
-                   num_patterns: int,
+                   num_levels: int = 10,
+                   num_patterns: int =1,
                 #    num_stones: int,
-                   stone_w_m: float,
-                   stone_distance_range_m=(0.02, 0.05),
+                   stone_w_m: float = 0.25,
+                   stone_distance_range_m=(0.02, 0.06),
                    seed0: int = 1234):
         """
         self.xy_bank[level][pattern] = torch.Tensor [N,2]
         """
         self.xy_bank = [[None for _ in range(num_patterns)] for _ in range(num_levels)]
+        self.meta_bank = [[None for _ in range(num_patterns)] for _ in range(num_levels)]
+
 
         for lvl in range(num_levels):
             # level -> difficulty (0..1)
@@ -3173,7 +3181,7 @@ class ManagerBasedEnv:
                 xy_list, meta = stepping_stones_xy_front_half_pixelwise(
                     size_x_m=8.0,
                     size_y_m=8.0,
-                    horizontal_scale=0.02,
+                    horizontal_scale=0.005,
                     platform_width_m=1.0,
                     difficulty=diff,
 
@@ -3190,6 +3198,7 @@ class ManagerBasedEnv:
                     # ここはあなたの既存設定に合わせてOK
                     margin_m=0.2,
                     platform_clearance_m=0.0,
+                    outer_slack_m = 0.4,
                     per_row_phase=False,
                 )
 
@@ -3204,10 +3213,13 @@ class ManagerBasedEnv:
                     xy_list, device=self.device, dtype=torch.float32
                 )
 
+                self.meta_bank[lvl][k] = meta  # ★ここがポイント（pitch_px, stone_dist_px が入ってる）
+
+
 
     
 
-    def reset_stones_by_terrain_level(self, env_ids: torch.Tensor, num_patterns: int):
+    def reset_stones_by_terrain_level(self, env_ids: torch.Tensor, num_patterns: int=1):
         terrain = self.scene.terrain
 
         # envごとのレベル（Terrain Generatorが管理しているやつ）
@@ -3215,6 +3227,23 @@ class ManagerBasedEnv:
 
         # envごとにパターンをランダム選択（これが「パターンあり」）
         pats = torch.randint(0, num_patterns, (env_ids.numel(),), device=self.device)  # [N_env]
+
+        debug_n = 5
+
+
+        n = min(int(env_ids.numel()), int(debug_n))
+        for i in range(n):
+            eid = int(env_ids[i].item())
+            lvl = int(levels[i].item())
+            pat = int(pats[i].item())
+            meta = self.meta_bank[lvl][pat]
+            print(f"env_id={eid} level={lvl} pattern={pat} "
+                f"pitch_px={meta.get('pitch_px')} dist_px={meta.get('stone_dist_px')}")
+
+
+        # for lvl in range(10):
+        #     meta = self.meta_bank[lvl][0]
+        #     print(lvl, meta["stone_dist_px"], meta["pitch_px"])
 
         # (level, pattern) の組でグルーピングして、グループごとに self.xy_local を差し替えて _reset_stones
         # ※ self.xy_local は全env共通参照なので、同じxyを使うenv群ごとに呼ぶ必要がある
@@ -3312,6 +3341,43 @@ class ManagerBasedEnv:
 
 
         self._reset_idx(env_ids)
+
+
+
+
+        self.stones = self.scene.rigid_object_collections["stones"]
+
+
+        z0 = 0.3
+        self.stone_z_local = z0 - STONE_H * 0.5
+
+
+        # # ③ 全Env一括で初期配置
+        # self._place_all_stones()
+
+    
+
+        # robot = self.scene.articulations["robot"]
+        # print("========================================")
+        # print("!!! ROBOT JOINT ORDER CHECK !!!")
+        # for i, name in enumerate(robot.joint_names):
+        #     print(f"Index {i:02d}: {name}")
+        # print("========================================")
+
+
+
+
+        # reset_stones_ring(
+        #     self,
+        #     env_ids,
+        #     self.xy_local,
+        #     self.stone_z_local,
+        #     collection_name="stones",
+        # )
+
+        self.reset_stones_by_terrain_level(env_ids)
+
+
 
         # set the state
         self.scene.reset_to(state, env_ids, is_relative=is_relative)
@@ -3536,6 +3602,13 @@ class ManagerBasedEnv:
 
             self._buf.alive[env_ids]  = False
             self._buf.hold_t[env_ids] = 0.0
+
+
+
+
+
+        
+        # if env_ids.numel() > 0:
 
 
         # iterate over all managers and reset them
