@@ -942,7 +942,7 @@ def moat_terrain(difficulty: float, cfg: MeshMoatTerrainCfg):
     # 2) 中央プラットフォーム（天面 z = 0）
     plat_center_z = 0.0 - cfg.platform_thickness / 2.0
     platform = trimesh.creation.box(
-        (plat_w, plat_w, cfg.platform_thickness),
+        (plat_w, 2.0, cfg.platform_thickness),
         trimesh.transformations.translation_matrix([Lx / 2.0, Ly / 2.0, plat_center_z])
     )
     meshes_list.append(platform)

@@ -3164,7 +3164,7 @@ class ManagerBasedEnv:
                    num_patterns: int =1,
                 #    num_stones: int,
                    stone_w_m: float = 0.25,
-                   stone_distance_range_m=(0.02, 0.06),
+                   stone_distance_range_m=(0.00, 0.06),
                    seed0: int = 1234):
         """
         self.xy_bank[level][pattern] = torch.Tensor [N,2]
@@ -3183,7 +3183,7 @@ class ManagerBasedEnv:
                     size_y_m=8.0,
                     horizontal_scale=0.005,
                     platform_width_m=1.0,
-                    difficulty=diff,
+                    difficulty=0,
 
                     # ★サイズ固定
                     stone_width_range_m=(stone_w_m, stone_w_m),
@@ -3198,7 +3198,7 @@ class ManagerBasedEnv:
                     # ここはあなたの既存設定に合わせてOK
                     margin_m=0.2,
                     platform_clearance_m=0.0,
-                    outer_slack_m = 0.4,
+                    outer_slack_m = 0.8,
                     per_row_phase=False,
                 )
 
