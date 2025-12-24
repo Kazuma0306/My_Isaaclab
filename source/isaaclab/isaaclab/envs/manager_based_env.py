@@ -2022,6 +2022,8 @@ def stepping_stones_xy_front_half_pixelwise(
     seed: int = 0,
     outer_slack_m: float = 0.2,            # ★外側だけ余白（台側には入れない）
     max_points: Optional[int] = None,    # 石数を固定したいなら指定（足りない場合は返り値が少なくなる）
+    y_band_m: float = 0.35  # 例：中央±0.35m だけに石を置く
+
 ) -> tuple[List[Tuple[float, float]], dict]:
     """
     返り値:
@@ -2073,8 +2075,34 @@ def stepping_stones_xy_front_half_pixelwise(
     # パッチが完全に入る条件: x0 >= 0側境界 かつ x0+w_px <= W-margin_px
     outer_slack_px = int(outer_slack_m / h)
 
-    y0_min = margin_px+ outer_slack_px
-    y0_max = H - margin_px - w_px- outer_slack_px
+    # y0_min = margin_px+ outer_slack_px
+    # y0_max = H - margin_px - w_px- outer_slack_px
+
+
+    y0_min_base = margin_px + outer_slack_px
+    y0_max_base = H - margin_px - w_px - outer_slack_px
+
+    # 中央帯 |y| <= y_band_m に制限（石が帯からはみ出さないようにする）
+    y_band_px = int(y_band_m / h)
+
+    # 石中心 yc = y0 + w_px/2 が満たすべき条件：
+    #   |(yc - cy)*h| + (w_eff_m/2) <= y_band_m
+    # ピクセルで書くと：
+    #   |yc - cy| <= (y_band_m - w_eff_m/2)/h
+    yc_band_px = (y_band_m - 0.5 * w_eff_m) / h
+    yc_band_px = max(0.0, yc_band_px)  # 帯が狭すぎる場合の保険
+
+    yc_min = cy - yc_band_px
+    yc_max = cy + yc_band_px
+
+    # y0 = yc - w_px/2 なので
+    y0_min_band = int(math.ceil(yc_min - 0.5 * w_px))
+    y0_max_band = int(math.floor(yc_max - 0.5 * w_px))
+
+    y0_min = max(y0_min_base, y0_min_band)
+    y0_max = min(y0_max_base, y0_max_band)
+
+
     # x0_min = max(cx, m・n_px - w_・px
     # x0_min = max(px2c, cx, margin_px)
     x0_min = max(px2c + 1, cx, margin_px)
@@ -2134,170 +2162,193 @@ def stepping_stones_xy_front_half_pixelwise(
 
 
 
-def stepping_stones_xy_front_half_pixelwise2(
-    size_x_m: float,
-    size_y_m: float,
-    horizontal_scale: float,
-    platform_width_m: float,
-    difficulty: float,
-    stone_width_range_m: tuple[float, float] = (0.25, 0.25),      # サイズ固定なら (w,w)
-    stone_distance_range_m: tuple[float, float] = (0.10, 0.35),
-    margin_m: float = 0.2,
-    outer_slack_m: float = 0.2,            # ★外側だけ余白（台側には入れない）
-    platform_clearance_m: float = 0.0,
-    per_row_phase: bool = True,
-    seed: int = 0,
-    max_points: Optional[int] = None,      # ★石数固定したいなら必ず指定
-    platform_gap_px: int = 0,              # ★台と石の最小ギャップ（0=隙間なし狙い）
-):
-    h = float(horizontal_scale)
-    rng = random.Random(seed)
+# def stepping_stones_xy_front_half_pixelwise2(
+#     size_x_m: float,
+#     size_y_m: float,
+#     horizontal_scale: float,
+#     platform_width_m: float,
+#     difficulty: float,
+#     stone_width_range_m: tuple[float, float] = (0.25, 0.25),      # サイズ固定なら (w,w)
+#     stone_distance_range_m: tuple[float, float] = (0.10, 0.35),
+#     margin_m: float = 0.2,
+#     outer_slack_m: float = 0.2,            # ★外側だけ余白（台側には入れない）
+#     platform_clearance_m: float = 0.0,
+#     per_row_phase: bool = True,
+#     seed: int = 0,
+#     max_points: Optional[int] = None,      # ★石数固定したいなら必ず指定
+#     platform_gap_px: int = 0,              # ★台と石の最小ギャップ（0=隙間なし狙い）
+# ):
+#     h = float(horizontal_scale)
+#     rng = random.Random(seed)
 
-    W = int(size_x_m / h)
-    H = int(size_y_m / h)
-    cx = W // 2
-    cy = H // 2
+#     W = int(size_x_m / h)
+#     H = int(size_y_m / h)
+#     cx = W // 2
+#     cy = H // 2
 
-    # difficulty で pitch
-    w_px, dist_px, w_eff_m, dist_eff_m = params_from_difficulty(
-        difficulty, h, stone_width_range_m, stone_distance_range_m
-    )
-    pitch_px = max(1, w_px + dist_px)
+#     # difficulty で pitch
+#     w_px, dist_px, w_eff_m, dist_eff_m = params_from_difficulty(
+#         difficulty, h, stone_width_range_m, stone_distance_range_m
+#     )
+#     pitch_px = max(1, w_px + dist_px)
 
-    # 最難pitch（石数固定用）
-    w_px_max, dist_px_max, _, _ = params_from_difficulty(
-        1.0, h, stone_width_range_m, stone_distance_range_m
-    )
-    pitch_px_max = max(1, w_px_max + dist_px_max)
+#     # 最難pitch（石数固定用）
+#     w_px_max, dist_px_max, _, _ = params_from_difficulty(
+#         1.0, h, stone_width_range_m, stone_distance_range_m
+#     )
+#     pitch_px_max = max(1, w_px_max + dist_px_max)
 
-    # platform bbox (px)
-    pf_px = int(platform_width_m / h)
-    px1 = (W - pf_px) // 2
-    px2 = (W + pf_px) // 2
-    py1 = (H - pf_px) // 2
-    py2 = (H + pf_px) // 2
+#     # platform bbox (px)
+#     pf_px = int(platform_width_m / h)
+#     px1 = (W - pf_px) // 2
+#     px2 = (W + pf_px) // 2
+#     py1 = (H - pf_px) // 2
+#     py2 = (H + pf_px) // 2
 
-    clear_px = int(platform_clearance_m / h)
-    px1c, px2c = px1 - clear_px, px2 + clear_px
-    py1c, py2c = py1 - clear_px, py2 + clear_px
+#     clear_px = int(platform_clearance_m / h)
+#     px1c, px2c = px1 - clear_px, px2 + clear_px
+#     py1c, py2c = py1 - clear_px, py2 + clear_px
 
-    margin_px = int(margin_m / h)
-    outer_slack_px = int(outer_slack_m / h)
+#     margin_px = int(margin_m / h)
+#     outer_slack_px = int(outer_slack_m / h)
 
-    # ---- ★台側アンカー（x方向）----
-    # 「隙間なし」を狙って px2c ちょうどに置く。衝突するなら1pxずつ右へ逃がす。
-    x0_start = max(px2c + platform_gap_px, cx, margin_px)
+#     # ---- ★台側アンカー（x方向）----
+#     # 「隙間なし」を狙って px2c ちょうどに置く。衝突するなら1pxずつ右へ逃がす。
+#     x0_start = max(px2c + platform_gap_px, cx, margin_px)
 
-    # もし台と交差する定義（rect_intersect_1dの仕様）だと当たる場合があるので、最小で交差しない位置にする
-    def intersects_platform_x(sx0, sx1):
-        return rect_intersect_1d(sx0, sx1, px1c, px2c)
+#     # もし台と交差する定義（rect_intersect_1dの仕様）だと当たる場合があるので、最小で交差しない位置にする
+#     def intersects_platform_x(sx0, sx1):
+#         return rect_intersect_1d(sx0, sx1, px1c, px2c)
 
-    # x方向だけ先にチェック（yは後でチェック）
-    while intersects_platform_x(x0_start, x0_start + w_px):
-        x0_start += 1  # どうしてもダメなら 1px だけ隙間ができるが、最小に抑える
+#     # x方向だけ先にチェック（yは後でチェック）
+#     while intersects_platform_x(x0_start, x0_start + w_px):
+#         x0_start += 1  # どうしてもダメなら 1px だけ隙間ができるが、最小に抑える
 
-    # ---- 外側端（+x側）には余白を残す ----
-    x0_max = W - margin_px - w_px - outer_slack_px
+#     # ---- 外側端（+x側）には余白を残す ----
+#     x0_max = W - margin_px - w_px - outer_slack_px
 
-    # y方向も上下端に余白
-    y0_min = margin_px + outer_slack_px
-    y0_max = H - margin_px - w_px - outer_slack_px
+#     # y方向も上下端に余白
+#     # y0_min = margin_px + outer_slack_px
+#     # y0_max = H - margin_px - w_px - outer_slack_px
 
-    # ---- ★石数固定：最難pitchで rows/cols を決める ----
-    # phaseは「2個目以降」にしか掛けないが、最大phaseがあると右端に寄るので見込みで控える
-    phase_max = (w_px - 1) if (per_row_phase and w_px > 1) else 0
+#     y0_min_base = margin_px + outer_slack_px
+#     y0_max_base = H - margin_px - w_px - outer_slack_px
 
-    # 右端までに入る列数（最難pitch基準）
-    # 1列目は x0_start 固定、2列目以降は x0_start + phase + (c-1)*pitch
-    # 最後の列の左下: x0_start + phase_max + (n_cols-2)*pitch_px_max
-    # その右端が x0_max+w_px を超えない必要
-    if x0_start > x0_max:
-        return [], {"reason": "no_space_x"}
+#     # 中央帯 |y| <= y_band_m に制限（石が帯からはみ出さないようにする）
+#     y_band_px = int(y_band_m / h)
 
-    usable_w = x0_max - (x0_start + phase_max)
-    # n_cols >=1
-    n_cols_max = 1 if usable_w < 0 else (2 + (usable_w // pitch_px_max))  # 2列目以降の分を数える
-    usable_h = y0_max - y0_min
-    n_rows_max = 1 if usable_h < 0 else (1 + (usable_h // pitch_px_max))
+#     # 石中心 yc = y0 + w_px/2 が満たすべき条件：
+#     #   |(yc - cy)*h| + (w_eff_m/2) <= y_band_m
+#     # ピクセルで書くと：
+#     #   |yc - cy| <= (y_band_m - w_eff_m/2)/h
+#     yc_band_px = (y_band_m - 0.5 * w_eff_m) / h
+#     yc_band_px = max(0.0, yc_band_px)  # 帯が狭すぎる場合の保険
 
-    if n_cols_max <= 0 or n_rows_max <= 0:
-        return [], {"reason": "no_space"}
+#     yc_min = cy - yc_band_px
+#     yc_max = cy + yc_band_px
 
-    if max_points is not None:
-        n_cols = min(n_cols_max, max_points)
-        n_rows = (max_points + n_cols - 1) // n_cols
-        if n_rows > n_rows_max:
-            n_rows = n_rows_max
-            n_cols = (max_points + n_rows - 1) // n_rows
-        if n_cols > n_cols_max or n_rows > n_rows_max or (n_rows * n_cols) < max_points:
-            return [], {
-                "reason": "cannot_fit_max_points_at_max_pitch",
-                "n_cols_max": int(n_cols_max),
-                "n_rows_max": int(n_rows_max),
-                "requested": int(max_points),
-                "pitch_px_max": int(pitch_px_max),
-            }
-    else:
-        n_cols, n_rows = int(n_cols_max), int(n_rows_max)
+#     # y0 = yc - w_px/2 なので
+#     y0_min_band = int(math.ceil(yc_min - 0.5 * w_px))
+#     y0_max_band = int(math.floor(yc_max - 0.5 * w_px))
 
-    # ---- 配置 ----
-    xy = []
-    for r in range(n_rows):
-        y0 = y0_min + r * pitch_px
-        if y0 > y0_max:
-            continue
+#     y0_min = max(y0_min_base, y0_min_band)
+#     y0_max = min(y0_max_base, y0_max_band)
 
-        phase = rng.randrange(0, w_px) if (per_row_phase and w_px > 1) else 0
+#     # ---- ★石数固定：最難pitchで rows/cols を決める ----
+#     # phaseは「2個目以降」にしか掛けないが、最大phaseがあると右端に寄るので見込みで控える
+#     phase_max = (w_px - 1) if (per_row_phase and w_px > 1) else 0
 
-        for c in range(n_cols):
-            # ★1個目は台にアンカー。2個目以降のみphaseを適用
-            if c == 0:
-                x0 = x0_start
-            else:
-                x0 = x0_start + phase + (c - 1) * pitch_px
+#     # 右端までに入る列数（最難pitch基準）
+#     # 1列目は x0_start 固定、2列目以降は x0_start + phase + (c-1)*pitch
+#     # 最後の列の左下: x0_start + phase_max + (n_cols-2)*pitch_px_max
+#     # その右端が x0_max+w_px を超えない必要
+#     if x0_start > x0_max:
+#         return [], {"reason": "no_space_x"}
 
-            if x0 > x0_max:
-                continue
+#     usable_w = x0_max - (x0_start + phase_max)
+#     # n_cols >=1
+#     n_cols_max = 1 if usable_w < 0 else (2 + (usable_w // pitch_px_max))  # 2列目以降の分を数える
+#     usable_h = y0_max - y0_min
+#     n_rows_max = 1 if usable_h < 0 else (1 + (usable_h // pitch_px_max))
 
-            sx0, sx1 = x0, x0 + w_px
-            sy0, sy1 = y0, y0 + w_px
+#     if n_cols_max <= 0 or n_rows_max <= 0:
+#         return [], {"reason": "no_space"}
 
-            hit_platform = (
-                rect_intersect_1d(sx0, sx1, px1c, px2c)
-                and rect_intersect_1d(sy0, sy1, py1c, py2c)
-            )
-            if hit_platform:
-                continue
+#     if max_points is not None:
+#         n_cols = min(n_cols_max, max_points)
+#         n_rows = (max_points + n_cols - 1) // n_cols
+#         if n_rows > n_rows_max:
+#             n_rows = n_rows_max
+#             n_cols = (max_points + n_rows - 1) // n_rows
+#         if n_cols > n_cols_max or n_rows > n_rows_max or (n_rows * n_cols) < max_points:
+#             return [], {
+#                 "reason": "cannot_fit_max_points_at_max_pitch",
+#                 "n_cols_max": int(n_cols_max),
+#                 "n_rows_max": int(n_rows_max),
+#                 "requested": int(max_points),
+#                 "pitch_px_max": int(pitch_px_max),
+#             }
+#     else:
+#         n_cols, n_rows = int(n_cols_max), int(n_rows_max)
 
-            xc = x0 + w_px * 0.5
-            yc = y0 + w_px * 0.5
-            x_m = (xc - cx) * h
-            y_m = (yc - cy) * h
-            xy.append((float(x_m), float(y_m)))
+#     # ---- 配置 ----
+#     xy = []
+#     for r in range(n_rows):
+#         y0 = y0_min + r * pitch_px
+#         if y0 > y0_max:
+#             continue
 
-            if max_points is not None and len(xy) >= max_points:
-                return xy, {
-                    "pitch_px": int(pitch_px),
-                    "pitch_px_max": int(pitch_px_max),
-                    "n_rows": int(n_rows),
-                    "n_cols": int(n_cols),
-                    "x0_start_px": int(x0_start),
-                    "outer_slack_px": int(outer_slack_px),
-                    "dist_px": int(dist_px),
-                    "platform_gap_px": int(platform_gap_px),
-                }
+#         phase = rng.randrange(0, w_px) if (per_row_phase and w_px > 1) else 0
 
-    return xy, {
-        "pitch_px": int(pitch_px),
-        "pitch_px_max": int(pitch_px_max),
-        "n_rows": int(n_rows),
-        "n_cols": int(n_cols),
-        "produced": int(len(xy)),
-        "x0_start_px": int(x0_start),
-        "outer_slack_px": int(outer_slack_px),
-        "dist_px": int(dist_px),
-        "platform_gap_px": int(platform_gap_px),
-    }
+#         for c in range(n_cols):
+#             # ★1個目は台にアンカー。2個目以降のみphaseを適用
+#             if c == 0:
+#                 x0 = x0_start
+#             else:
+#                 x0 = x0_start + phase + (c - 1) * pitch_px
+
+#             if x0 > x0_max:
+#                 continue
+
+#             sx0, sx1 = x0, x0 + w_px
+#             sy0, sy1 = y0, y0 + w_px
+
+#             hit_platform = (
+#                 rect_intersect_1d(sx0, sx1, px1c, px2c)
+#                 and rect_intersect_1d(sy0, sy1, py1c, py2c)
+#             )
+#             if hit_platform:
+#                 continue
+
+#             xc = x0 + w_px * 0.5
+#             yc = y0 + w_px * 0.5
+#             x_m = (xc - cx) * h
+#             y_m = (yc - cy) * h
+#             xy.append((float(x_m), float(y_m)))
+
+#             if max_points is not None and len(xy) >= max_points:
+#                 return xy, {
+#                     "pitch_px": int(pitch_px),
+#                     "pitch_px_max": int(pitch_px_max),
+#                     "n_rows": int(n_rows),
+#                     "n_cols": int(n_cols),
+#                     "x0_start_px": int(x0_start),
+#                     "outer_slack_px": int(outer_slack_px),
+#                     "dist_px": int(dist_px),
+#                     "platform_gap_px": int(platform_gap_px),
+#                 }
+
+#     return xy, {
+#         "pitch_px": int(pitch_px),
+#         "pitch_px_max": int(pitch_px_max),
+#         "n_rows": int(n_rows),
+#         "n_cols": int(n_cols),
+#         "produced": int(len(xy)),
+#         "x0_start_px": int(x0_start),
+#         "outer_slack_px": int(outer_slack_px),
+#         "dist_px": int(dist_px),
+#         "platform_gap_px": int(platform_gap_px),
+#     }
 
 
 
@@ -2825,37 +2876,37 @@ class ManagerBasedEnv:
         # )
 
 
-        self.stones = self.scene.rigid_object_collections["stones"]
+        # self.stones = self.scene.rigid_object_collections["stones"]
 
-        # self.xy_local = torch.tensor(stone_xy_list, dtype=torch.float32, device=self.scene.device)
-        z0 = 0.3
-        self.stone_z_local = z0 - STONE_H * 0.5
+        # # self.xy_local = torch.tensor(stone_xy_list, dtype=torch.float32, device=self.scene.device)
+        # z0 = 0.3
+        # self.stone_z_local = z0 - STONE_H * 0.5
 
 
-        # # ③ 全Env一括で初期配置
-        # self._place_all_stones()
+        # # # ③ 全Env一括で初期配置
+        # # self._place_all_stones()
 
     
 
-        # robot = self.scene.articulations["robot"]
-        # print("========================================")
-        # print("!!! ROBOT JOINT ORDER CHECK !!!")
-        # for i, name in enumerate(robot.joint_names):
-        #     print(f"Index {i:02d}: {name}")
-        # print("========================================")
+        # # robot = self.scene.articulations["robot"]
+        # # print("========================================")
+        # # print("!!! ROBOT JOINT ORDER CHECK !!!")
+        # # for i, name in enumerate(robot.joint_names):
+        # #     print(f"Index {i:02d}: {name}")
+        # # print("========================================")
 
 
 
 
-        # reset_stones_ring(
-        #     self,
-        #     env_ids,
-        #     self.xy_local,
-        #     self.stone_z_local,
-        #     collection_name="stones",
-        # )
+        # # reset_stones_ring(
+        # #     self,
+        # #     env_ids,
+        # #     self.xy_local,
+        # #     self.stone_z_local,
+        # #     collection_name="stones",
+        # # )
 
-        self.reset_stones_by_terrain_level(env_ids)
+        # self.reset_stones_by_terrain_level(env_ids)
 
 
 
@@ -3183,7 +3234,7 @@ class ManagerBasedEnv:
                     size_y_m=8.0,
                     horizontal_scale=0.005,
                     platform_width_m=1.0,
-                    difficulty=0,
+                    difficulty=diff,
 
                     # ★サイズ固定
                     stone_width_range_m=(stone_w_m, stone_w_m),
@@ -3200,6 +3251,7 @@ class ManagerBasedEnv:
                     platform_clearance_m=0.0,
                     outer_slack_m = 0.8,
                     per_row_phase=False,
+                    y_band_m = 0.8
                 )
 
                 # # ★不足はサイレントに流すと地獄なので、ここで止めるのを推奨

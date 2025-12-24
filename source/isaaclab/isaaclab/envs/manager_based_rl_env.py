@@ -400,35 +400,35 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
 
 
 
-        self.stones = self.scene.rigid_object_collections["stones"]
+        # self.stones = self.scene.rigid_object_collections["stones"]
 
-        # self.xy_local = torch.tensor(stone_xy_list, dtype=torch.float32, device=self.scene.device)
-        # z0 = 0.3
-        # self.stone_z_local = z0 - STONE_H * 0.5
-        self.stone_z_local =0.15
+        # # self.xy_local = torch.tensor(stone_xy_list, dtype=torch.float32, device=self.scene.device)
+        # # z0 = 0.3
+        # # self.stone_z_local = z0 - STONE_H * 0.5
+        # self.stone_z_local =0.15
 
 
-        # # ③ 全Env一括で初期配置
-        # self._place_all_stones()
+        # # # ③ 全Env一括で初期配置
+        # # self._place_all_stones()
 
     
 
-        # robot = self.scene.articulations["robot"]
-        # print("========================================")
-        # print("!!! ROBOT JOINT ORDER CHECK !!!")
-        # for i, name in enumerate(robot.joint_names):
-        #     print(f"Index {i:02d}: {name}")
-        # print("========================================")
+        # # robot = self.scene.articulations["robot"]
+        # # print("========================================")
+        # # print("!!! ROBOT JOINT ORDER CHECK !!!")
+        # # for i, name in enumerate(robot.joint_names):
+        # #     print(f"Index {i:02d}: {name}")
+        # # print("========================================")
 
 
 
 
-        # reset_stones_ring(
-        #     self,
-        #     env_ids,
-        #     self.xy_local,
-        #     self.stone_z_local,
-        #     collection_name="stones",
-        # )
+        # # reset_stones_ring(
+        # #     self,
+        # #     env_ids,
+        # #     self.xy_local,
+        # #     self.stone_z_local,
+        # #     collection_name="stones",
+        # # )
 
-        self.reset_stones_by_terrain_level(env_ids)
+        # self.reset_stones_by_terrain_level(env_ids)
